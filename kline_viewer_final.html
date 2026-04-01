@@ -1,0 +1,1389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>大道量化系统 · Final版 · 双宝典信号引擎 | 因子驱动 · 大宗商品智能K线</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js">
+// 信号引擎UI函数
+let showSignals = false;
+let currentSignals = [];
+
+function toggleSignals() {
+    showSignals = !showSignals;
+    const btn = document.getElementById('btn-signal');
+    btn.classList.toggle('active', showSignals);
+    if (showSignals) runSignalAnalysis();
+    else renderChart(); // 刷新图表，移除信号标记
+}
+
+function runSignalAnalysis() {
+    const data = currentData;
+    if (!data || data.length < 30) return;
+    
+    const maData = {};
+    state.maConfig.forEach(m => {
+        const ma = calcMA(data, m.period, m.type);
+        maData['ma' + m.period] = ma;
+    });
+    
+    currentSignals = TradingSignalEngine.analyze(data, maData);
+    // 记录最新信号到AI学习模块
+    if (currentSignals.length > 0) {
+        const latest = currentSignals[currentSignals.length - 1];
+        if (latest.signal !== 'NEUTRAL') {
+            AILearningModule.recordSignal(latest);
+        }
+    }
+    renderChart();
+    updateSignalInfo();
+}
+
+function updateSignalInfo() {
+    if (currentSignals.length === 0) return;
+    const latest = currentSignals[currentSignals.length - 1];
+    const infoEl = document.getElementById('signal-info');
+    if (infoEl) {
+        const sigMap = { 'STRONG_BUY': '强买入', 'BUY': '买入', 'SELL': '卖出', 'STRONG_SELL': '强卖出', 'NEUTRAL': '观望' };
+        infoEl.innerHTML = `信号: <span style="color:${latest.color};font-weight:700">${sigMap[latest.signal] || latest.signal}</span>` +
+            (latest.rr && latest.rr !== 'N/A' ? ` | 盈亏比: <span style="color:#f5c518">${latest.rr}:1</span>` : '') +
+            ` | 评分: <span style="color:${latest.score > 0 ? '#f85149' : latest.score < 0 ? '#3fb950' : '#e6edf3'}">${latest.score}</span>`;
+    }
+}
+
+function showAIReport() {
+    const report = AILearningModule.generateReport();
+    let existing = document.querySelector('.ai-report');
+    if (existing) { existing.remove(); return; }
+    
+    const div = document.createElement('div');
+    div.className = 'ai-report';
+    div.innerHTML = `<h3>🤖 AI自我学习进化报告</h3>
+        <div class="stat"><span class="label">累计信号样本</span><span class="value">${report.total}</span></div>
+        <div class="stat"><span class="label">买入信号</span><span class="value">${report.buyCount || 0}</span></div>
+        <div class="stat"><span class="label">卖出信号</span><span class="value">${report.sellCount || 0}</span></div>
+        <div class="stat"><span class="label">平均评分</span><span class="value">${report.avgScore}</span></div>
+        <div class="stat"><span class="label">买入阈值</span><span class="value">${report.threshold.buyThreshold}分</span></div>
+        <div class="stat"><span class="label">卖出阈值</span><span class="value">${report.threshold.sellThreshold}分</span></div>
+        <div class="stat"><span class="label">最后更新</span><span class="value">${report.lastUpdate || '暂无'}</span></div>
+        <br><div style="font-size:11px;color:#8b949e;font-weight:600">📋 AI建议</div>
+        ${report.recommendations.map(r => `<div class="rec">• ${r}</div>`).join('')}
+        <br><button class="toolbar-btn" onclick="this.parentElement.remove()" style="width:100%">关闭</button>`;
+    document.body.appendChild(div);
+}
+
+</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;overflow-x:hidden}
+.header{background:linear-gradient(135deg,#161b22 0%,#0d1117 100%);border-bottom:1px solid #30363d;padding:8px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.header-left h1{font-size:15px;color:#f5c518;letter-spacing:1px}
+.header-left p{font-size:10px;color:#6e7681;margin-top:1px}
+.header-right{font-size:10px;color:#8b949e;text-align:right}
+.version-badge{display:inline-block;background:#da3633;color:#fff;font-size:9px;padding:2px 8px;border-radius:10px;margin-left:6px}
+/* 工具栏 */
+.toolbar{display:flex;padding:4px 16px;gap:6px;background:#0d1117;border-bottom:1px solid #21262d;align-items:center;flex-wrap:wrap}
+.toolbar-btn{padding:3px 10px;border-radius:8px;cursor:pointer;font-size:10px;border:1px solid #30363d;background:#21262d;color:#8b949e;transition:all 0.2s;white-space:nowrap}
+.toolbar-btn:hover{border-color:#58a6ff;color:#58a6ff}
+.toolbar-btn.active{background:#1f6feb;color:#fff;border-color:#1f6feb}
+.toolbar-sep{width:1px;height:16px;background:#30363d}
+.toolbar-info{font-size:9px;color:#484f58;margin-left:auto}
+/* 品种Tab */
+.sym-tabs{display:flex;padding:6px 16px;gap:5px;background:#161b22;border-bottom:1px solid #30363d;flex-wrap:wrap;align-items:center}
+.sym-tab{padding:4px 12px;border-radius:14px;cursor:pointer;font-size:11px;font-weight:600;border:1px solid #30363d;background:#21262d;color:#8b949e;transition:all 0.2s;white-space:nowrap}
+.sym-tab.active{color:#000;border-color:var(--sym-color)}
+.sym-tab:hover:not(.active){border-color:#58a6ff;color:#58a6ff}
+/* 周期Tab */
+.period-tabs{display:flex;padding:4px 16px;gap:3px;background:#0d1117;border-bottom:1px solid #21262d;align-items:center;flex-wrap:wrap}
+.period-label{font-size:10px;color:#6e7681;margin-right:6px}
+.period-tab{padding:2px 10px;border-radius:10px;cursor:pointer;font-size:10px;font-weight:500;border:1px solid #30363d;background:transparent;color:#6e7681;transition:all 0.2s;white-space:nowrap}
+.period-tab.active{background:#1f6feb;color:#fff;border-color:#1f6feb}
+.period-tab:hover:not(.active){border-color:#58a6ff;color:#58a6ff}
+.period-tab.custom{border-color:#f5c518;color:#f5c518;font-style:italic}
+.period-tab.custom.active{background:#f5c518;color:#000}
+/* 信息栏 */
+.info-bar{display:flex;padding:5px 16px;gap:14px;background:#161b22;border-bottom:1px solid #30363d;flex-wrap:wrap;align-items:center}
+.info-item{font-size:11px;white-space:nowrap}
+.info-item .lbl{color:#6e7681}
+.info-item .val{font-weight:700;margin-left:3px}
+.up{color:#f85149}.dn{color:#3fb950}.neutral{color:#e6edf3}
+/* 图表 */
+#chart{width:100%;height:calc(100vh - 260px);min-height:400px}
+/* 底部 */
+.footer{padding:4px 16px;background:#0d1117;border-top:1px solid #21262d;font-size:9px;color:#484f58;display:flex;justify-content:space-between;flex-wrap:wrap;gap:3px}
+/* 弹窗覆盖 */
+.overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:2000;background:rgba(0,0,0,0.6)}
+.overlay.show{display:block}
+/* 通用弹窗 */
+.modal{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#161b22;border:1px solid #30363d;border-radius:12px;padding:18px;z-index:2001;min-width:340px;max-width:560px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.6)}
+.modal.show{display:block}
+.modal-title{font-size:14px;font-weight:700;color:#e6edf3;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.modal-close{cursor:pointer;color:#6e7681;font-size:18px;line-height:1;padding:0 4px}
+.modal-close:hover{color:#e6edf3}
+/* 事件弹窗 */
+.popup-badge{display:inline-block;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600;margin-bottom:8px}
+.badge-bull{background:rgba(248,81,73,0.15);color:#f85149;border:1px solid rgba(248,81,73,0.3)}
+.badge-bear{background:rgba(63,185,80,0.15);color:#3fb950;border:1px solid rgba(63,185,80,0.3)}
+.badge-trend{background:rgba(245,197,24,0.15);color:#f5c518;border:1px solid rgba(245,197,24,0.3)}
+.popup-row{display:flex;margin-bottom:6px;font-size:11px;line-height:1.5}
+.popup-row .key{color:#6e7681;min-width:72px;flex-shrink:0}
+.popup-row .vval{color:#e6edf3;flex:1}
+.popup-divider{border:none;border-top:1px solid #21262d;margin:8px 0}
+.popup-signal{margin-top:8px;padding:8px;background:#0d1117;border-radius:8px;border-left:3px solid #f5c518}
+.popup-signal .sig-title{font-size:10px;color:#f5c518;font-weight:600;margin-bottom:3px}
+.popup-signal .sig-val{font-size:12px;color:#e6edf3;font-weight:700}
+/* 产业链 */
+.chain-row{display:flex;align-items:center;gap:8px;padding:8px;background:#0d1117;border-radius:8px;margin-bottom:6px}
+.chain-arrow{color:#58a6ff;font-size:16px}
+.chain-sym{font-weight:700;font-size:12px;padding:2px 8px;border-radius:6px;color:#000}
+.chain-delay{font-size:10px;color:#f5c518}
+/* 设置面板 */
+.setting-group{margin-bottom:14px}
+.setting-label{font-size:11px;color:#8b949e;margin-bottom:6px;font-weight:600}
+.setting-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+.setting-input{padding:4px 8px;border-radius:6px;border:1px solid #30363d;background:#0d1117;color:#e6edf3;font-size:11px;width:80px}
+.setting-input:focus{border-color:#58a6ff;outline:none}
+.setting-btn{padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;border:1px solid #30363d;background:#21262d;color:#8b949e;transition:all 0.2s}
+.setting-btn:hover{border-color:#58a6ff;color:#58a6ff}
+.setting-btn.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
+.setting-btn.danger{border-color:#f85149;color:#f85149}
+.setting-btn.danger:hover{background:#f85149;color:#fff}
+.ma-list{max-height:200px;overflow-y:auto}
+.ma-item{display:flex;align-items:center;gap:6px;padding:5px 8px;background:#0d1117;border-radius:6px;margin-bottom:4px;font-size:11px}
+.ma-color{width:24px;height:16px;border-radius:3px;border:1px solid #30363d;cursor:pointer;padding:0}
+.ma-type-select{padding:2px 4px;border-radius:4px;border:1px solid #30363d;background:#0d1117;color:#e6edf3;font-size:10px}
+.ma-width-input{width:36px;padding:2px 4px;border-radius:4px;border:1px solid #30363d;background:#0d1117;color:#e6edf3;font-size:10px;text-align:center}
+.ma-dash-select{padding:2px 4px;border-radius:4px;border:1px solid #30363d;background:#0d1117;color:#e6edf3;font-size:10px}
+/* 图例 */
+.legend-dots{display:flex;gap:10px;align-items:center;font-size:9px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:2px}
+.dot-bull{background:#f85149}.dot-bear{background:#3fb950}.dot-trend{background:#f5c518}
+/* 加载动画 */
+.loading{display:flex;align-items:center;justify-content:center;height:calc(100vh - 260px);color:#6e7681;font-size:13px}
+.loading::after{content:'';width:20px;height:20px;border:2px solid #30363d;border-top-color:#58a6ff;border-radius:50%;animation:spin 0.8s linear infinite;margin-left:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.shortcut-hint{position:fixed;bottom:28px;right:12px;font-size:9px;color:#30363d;z-index:10}
+
+.signal-badge{display:inline-block;font-size:9px;padding:1px 5px;border-radius:8px;font-weight:700;margin:0 2px}
+.signal-buy{background:#da3633;color:#fff}
+.signal-sell{background:#238636;color:#fff}
+.signal-neutral{background:#484f58;color:#fff}
+.ai-report{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#161b22;border:1px solid #f5c518;border-radius:12px;padding:18px;z-index:3000;min-width:380px;max-width:500px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.8)}
+.ai-report h3{color:#f5c518;font-size:14px;margin-bottom:10px}
+.ai-report .stat{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #21262d;font-size:11px}
+.ai-report .stat .label{color:#8b949e}
+.ai-report .stat .value{color:#e6edf3;font-weight:600}
+.ai-report .rec{font-size:10px;color:#58a6ff;padding:3px 0}
+
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>大道量化系统 · 因子驱动1.0 <span class="version-badge">终极版</span></h1>
+    <p>大宗商品智能K线 · 自定义周期 · 自定义均线 · MACD · BOLL · 产业链传导 · 因子标注</p>
+  </div>
+  <div class="header-right">
+    <div>数据源：Yahoo Finance | 2024-05-28 ~ 2026-03-31</div>
+    <div style="margin-top:1px">不预测只识别，不预判只跟随</div>
+  </div>
+</div>
+
+<div class="toolbar">
+  <button class="toolbar-btn" onclick="toggleMACD()" id="btnMACD">MACD</button>
+  <button class="toolbar-btn" onclick="toggleBOLL()" id="btnBOLL">BOLL</button>
+  <div class="toolbar-sep"></div>
+  <button class="toolbar-btn" onclick="openPeriodSettings()">⚙ 周期设置</button>
+  <button class="toolbar-btn" onclick="openMASettings()">📐 均线设置</button>
+  <div class="toolbar-sep"></div>
+  <button class="toolbar-btn" onclick="showChainPanel()">产业链传导</button>
+  <button class="toolbar-btn" onclick="exportCSV()">导出CSV</button>
+  <div class="toolbar-sep"></div>
+  <button class="toolbar-btn" onclick="zoomToFit()">适应窗口</button>
+  <button class="toolbar-btn" onclick="zoomRecent()">最近100根</button>
+  <div class="toolbar-info" id="toolbarInfo">加载中...</div>
+</div>
+
+<div class="sym-tabs" id="symTabs">
+  <div class="sym-tab active" data-sym="GC" style="--sym-color:#f5c518;background:#f5c518" onclick="switchSym('GC',this)">黄金 GC</div>
+  <div class="sym-tab" data-sym="SI" style="--sym-color:#c0c0c0" onclick="switchSym('SI',this)">白银 SI</div>
+  <div class="sym-tab" data-sym="CL" style="--sym-color:#ff6b35" onclick="switchSym('CL',this)">原油 CL</div>
+  <div class="sym-tab" data-sym="NG" style="--sym-color:#4fc3f7" onclick="switchSym('NG',this)">天然气 NG</div>
+  <div class="sym-tab" data-sym="W" style="--sym-color:#a5d6a7" onclick="switchSym('W',this)">小麦 W</div>
+  <div style="margin-left:auto;font-size:9px;color:#484f58">
+    <span class="legend-dots">
+      <span><span class="dot dot-bull"></span>利多</span>
+      <span><span class="dot dot-bear"></span>利空</span>
+      <span><span class="dot dot-trend"></span>趋势</span>
+    </span>
+  </div>
+</div>
+
+<div class="period-tabs" id="periodTabs">
+  <span class="period-label">周期：</span>
+</div>
+
+<div class="info-bar" id="infoBar">
+  <div class="info-item"><span class="lbl">品种</span><span class="val neutral" id="iName">-</span></div>
+  <div class="info-item"><span class="lbl">最新</span><span class="val neutral" id="iLast">-</span></div>
+  <div class="info-item"><span class="lbl">开</span><span class="val neutral" id="iOpen">-</span></div>
+  <div class="info-item"><span class="lbl">高</span><span class="val up" id="iHigh">-</span></div>
+  <div class="info-item"><span class="lbl">低</span><span class="val dn" id="iLow">-</span></div>
+  <div class="info-item"><span class="lbl">涨跌幅</span><span class="val" id="iChange">-</span></div>
+  <div class="info-item"><span class="lbl">周期</span><span class="val neutral" id="iPeriod">-</span></div>
+  <div class="info-item"><span class="lbl">数据量</span><span class="val neutral" id="iBars">-</span></div>
+  <div class="info-item"><span class="lbl">单位</span><span class="val neutral" id="iUnit">-</span></div>
+</div>
+
+<div id="chart"><div class="loading">加载K线数据...</div></div>
+
+<div class="footer">
+  <span>大道心法：无动无静，无生无灭 | 不预测只识别，不预判只跟随 | 以K线为相，以量价为证，以结构为凭</span>
+  <span>快捷键: ←→品种 M=MACD B=BOLL C=产业链 E=导出 Esc=关闭弹窗</span>
+</div>
+
+<!-- 事件弹窗 -->
+<div class="overlay" id="popupOverlay" onclick="closePopup()"></div>
+<div class="modal" id="eventPopup">
+  <div class="modal-title"><span id="popupTitle">事件详情</span><span class="modal-close" onclick="closePopup()">&#10005;</span></div>
+  <div id="popupBadge" class="popup-badge badge-bull">利多信号</div>
+  <div class="popup-row"><span class="key">时间</span><span class="vval" id="popupDate">-</span></div>
+  <div class="popup-row"><span class="key">驱动因子</span><span class="vval" id="popupFactor">-</span></div>
+  <div class="popup-row"><span class="key">事件详情</span><span class="vval" id="popupDetail">-</span></div>
+  <hr class="popup-divider">
+  <div class="popup-row"><span class="key">影响逻辑</span><span class="vval" id="popupLogic">-</span></div>
+  <div class="popup-row"><span class="key">历史涨跌</span><span class="vval" id="popupAvg">-</span></div>
+  <hr class="popup-divider">
+  <div class="popup-signal"><div class="sig-title">操作建议</div><div class="sig-val" id="popupSignal">-</div></div>
+</div>
+
+<!-- 产业链面板 -->
+<div class="overlay" id="chainOverlay" onclick="closeChainPanel()"></div>
+<div class="modal" id="chainPanel" style="min-width:420px">
+  <div class="modal-title"><span style="color:#f5c518">产业链传导图谱</span><span class="modal-close" onclick="closeChainPanel()">&#10005;</span></div>
+  <div style="font-size:10px;color:#6e7681;margin-bottom:12px">地缘事件/OPEC → CL(即时) → NG(+1~3天) → W(+5~10天) | 避险情绪 → GC(即时) → SI(+0.5~2天)</div>
+  <div id="chainContent"></div>
+</div>
+
+<!-- 周期设置面板 -->
+<div class="overlay" id="periodOverlay" onclick="closePeriodSettings()"></div>
+<div class="modal" id="periodModal" style="min-width:380px">
+  <div class="modal-title"><span>⚙ 周期设置</span><span class="modal-close" onclick="closePeriodSettings()">&#10005;</span></div>
+  <div class="setting-group">
+    <div class="setting-label">添加自定义周期（输入数字+单位）</div>
+    <div class="setting-row">
+      <input class="setting-input" id="customPeriodInput" placeholder="如 2H / 6H / 3D / 12H" style="width:160px" onkeydown="if(event.key==='Enter')addCustomPeriod()">
+      <button class="setting-btn primary" onclick="addCustomPeriod()">+ 添加</button>
+      <span style="font-size:9px;color:#484f58">支持: H(小时) D(天) W(周) M(月)</span>
+    </div>
+  </div>
+  <div class="setting-group">
+    <div class="setting-label">当前周期列表</div>
+    <div id="periodList" class="ma-list"></div>
+  </div>
+  <div class="setting-row" style="justify-content:flex-end">
+    <button class="setting-btn" onclick="resetPeriods()">恢复默认</button>
+    <button class="setting-btn primary" onclick="saveAndClosePeriod()">保存并关闭</button>
+  </div>
+</div>
+
+<!-- 均线设置面板 -->
+<div class="overlay" id="maOverlay" onclick="closeMASettings()"></div>
+<div class="modal" id="maModal" style="min-width:480px">
+  <div class="modal-title"><span>📐 均线设置</span><span class="modal-close" onclick="closeMASettings()">&#10005;</span></div>
+  <div class="setting-group">
+    <div class="setting-label">添加均线</div>
+    <div class="setting-row">
+      <span style="font-size:10px;color:#6e7681">参数:</span>
+      <input class="setting-input" id="newMaParam" placeholder="如 7 / 200" type="number" min="1" max="999">
+      <span style="font-size:10px;color:#6e7681">类型:</span>
+      <select class="ma-type-select" id="newMaType"><option value="SMA">SMA</option><option value="EMA">EMA</option><option value="WMA">WMA</option></select>
+      <span style="font-size:10px;color:#6e7681">颜色:</span>
+      <input type="color" id="newMaColor" value="#ff9800" style="width:28px;height:22px;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;padding:0">
+      <button class="setting-btn primary" onclick="addMA()">+ 添加</button>
+    </div>
+  </div>
+  <div class="setting-group">
+    <div class="setting-label">当前均线列表 <span style="color:#484f58;font-weight:400">(点击颜色块修改)</span></div>
+    <div id="maList" class="ma-list"></div>
+  </div>
+  <div class="setting-row" style="justify-content:flex-end">
+    <button class="setting-btn" onclick="resetMA()">恢复默认</button>
+    <button class="setting-btn primary" onclick="saveAndCloseMA()">保存并关闭</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 常量配置
+// ============================================================
+const DATA_URL = 'html/chart_data_v2.json';
+const EVENTS_DB = [{"sym":"GC","date":"2024-06-12","type":"bull","title":"美联储暂停加息","factor":"降息预期因子","detail":"美联储6月会议暂停加息，暗示年内降息，黄金避险需求+降息预期双驱动","logic":"美元走弱→黄金上涨；降息预期上升→黄金配置需求增加","avg_move":"+2.1%","signal":"开多","trend":"上涨趋势确立"},{"sym":"GC","date":"2024-07-19","type":"bear","title":"特朗普支持比特币","factor":"避险因子减弱","detail":"特朗普共和党大会发表亲加密货币演讲，风险资产上涨，黄金获利回吐","logic":"风险偏好上升→黄金资金外流→短期回调","avg_move":"-1.5%","signal":"平多"},{"sym":"GC","date":"2024-09-18","type":"bull","title":"美联储降息50bp","factor":"降息因子触发","detail":"美联储超预期降息50bp，历史性节点。美元指数快速下跌，黄金突破历史高位","logic":"大幅降息→实际利率下降→黄金持仓成本降低→机构买入","avg_move":"+3.8%","signal":"开多","trend":"强势上涨趋势"},{"sym":"GC","date":"2024-11-05","type":"bear","title":"特朗普当选美国总统","factor":"特朗普因子","detail":"特朗普当选后美元指数暴涨，黄金短期承压下跌，但中期地缘风险依然利多","logic":"特朗普当选→美元走强→黄金短期承压；但贸易战预期→长期利多","avg_move":"-2.3%","signal":"减仓观望"},{"sym":"GC","date":"2025-01-20","type":"bull","title":"特朗普就职+关税威胁","factor":"地缘避险+关税因子","detail":"特朗普就职首日签署一系列行政令，对加、墨加征25%关税，全球贸易战担忧升温","logic":"贸易战→全球经济不确定性→避险需求→黄金上涨","avg_move":"+4.2%","signal":"开多","trend":"上涨趋势确立"},{"sym":"GC","date":"2025-04-02","type":"bull","title":"关税战全面升级","factor":"贸易战避险因子","detail":"特朗普宣布对所有进口商品加征基础关税10%+对中国商品加征50%，全球市场恐慌","logic":"关税战→全球衰退预期→大规模避险买入黄金→金价暴涨","avg_move":"+6.5%","signal":"开多","trend":"强势突破上涨"},{"sym":"GC","date":"2025-06-15","type":"bear","title":"美联储暂停降息","factor":"降息预期收缩","detail":"美联储6月会议暂停降息，表态鹰派，美元反弹，黄金获利回吐","logic":"暂停降息→实际利率预期上升→黄金持仓成本增加→回调","avg_move":"-3.1%","signal":"平多/减仓"},{"sym":"GC","date":"2025-08-05","type":"bull","title":"中东冲突再升级","factor":"地缘避险因子","detail":"以色列-伊朗冲突再升级，中东局势高度紧张，全球避险情绪暴涨","logic":"中东冲突→原油供给风险→全面避险→黄金白银同步暴涨","avg_move":"+5.2%","signal":"开多","trend":"上涨趋势确立"},{"sym":"GC","date":"2025-11-20","type":"bull","title":"美联储再次降息25bp","factor":"降息因子","detail":"美联储连续第三次降息，累计降息125bp，黄金创历史新高","logic":"持续降息→美元持续走弱→黄金系统性上涨","avg_move":"+2.8%","signal":"加仓"},{"sym":"GC","date":"2026-02-10","type":"bull","title":"地缘风险全面升温","factor":"全球避险因子","detail":"多地地缘冲突同时爆发，全球央行持续购金，黄金需求创历史记录","logic":"多因子共振：地缘+降息+央行购金→黄金突破新高","avg_move":"+4.1%","signal":"开多","trend":"历史性牛市确立"},{"sym":"GC","date":"2026-03-10","type":"bull","title":"黄金突破4600美元","factor":"技术突破+多因子共振","detail":"黄金突破4600关键阻力，MACD金叉，成交量放大，多因子完全共振","logic":"技术面突破+基本面支撑→趋势加速上涨","avg_move":"+3.5%","signal":"开多加仓","trend":"加速上涨趋势"},{"sym":"SI","date":"2024-09-19","type":"bull","title":"黄金联动带动白银","factor":"黄金联动因子+工业需求","detail":"Fed降息后黄金大涨，白银跟随上涨，工业需求（光伏/新能源）同步驱动","logic":"黄金上涨→金银比值修复→白银补涨，滞后0.5-2天","avg_move":"+4.5%","signal":"开多","trend":"补涨趋势"},{"sym":"SI","date":"2025-01-22","type":"bull","title":"白银滞后补涨启动","factor":"黄金联动+工业需求","detail":"特朗普关税战后黄金先涨，白银补涨启动，光伏装机量创新高推动工业需求","logic":"白银兼具避险+工业属性，弹性更大，补涨幅度通常超过黄金","avg_move":"+6.8%","signal":"开多","trend":"补涨加速"},{"sym":"SI","date":"2025-08-07","type":"bull","title":"中东危机 金银同步暴涨","factor":"避险+工业共振","detail":"中东冲突带动全面避险，白银同步暴涨，一天内涨幅超黄金","logic":"地缘危机→避险因子触发→白银弹性大于黄金→超额收益","avg_move":"+7.2%","signal":"开多"},{"sym":"SI","date":"2025-10-15","type":"bear","title":"工业需求担忧","factor":"工业需求因子减弱","detail":"全球PMI数据走弱，工业需求预期下降，白银相对黄金跑输","logic":"工业需求下降→白银工业属性拖累→金银比扩大→白银相对弱势","avg_move":"-2.8%","signal":"减仓"},{"sym":"SI","date":"2026-01-15","type":"bull","title":"白银再次补涨","factor":"黄金联动+绿能需求","detail":"黄金创新高，白银再次启动补涨，绿色能源转型推动工业需求长期利多","logic":"长期：绿色能源→光伏用银增加→白银工业需求增长；短期：黄金联动","avg_move":"+5.5%","signal":"开多","trend":"上涨趋势确立"},{"sym":"CL","date":"2024-06-02","type":"bull","title":"OPEC+维持减产至2025年底","factor":"供给收缩因子","detail":"OPEC+会议决定将减产协议延至2025年底，市场预期供给持续收紧","logic":"减产→供给减少→原油价格支撑；沙特额外减产100万桶/天","avg_move":"+3.2%","signal":"开多","trend":"供给支撑趋势"},{"sym":"CL","date":"2024-08-05","type":"bear","title":"全球衰退担忧压制原油","factor":"需求收缩因子","detail":"美国就业数据弱于预期，全球经济衰退担忧升温，原油需求预期下降","logic":"经济衰退预期→需求下降→原油下跌；OPEC减产对冲部分压力","avg_move":"-4.1%","signal":"减仓/平多"},{"sym":"CL","date":"2025-01-21","type":"bull","title":"特朗普对伊朗极限施压","factor":"霍尔木兹地缘因子","detail":"特朗普签署重新制裁伊朗行政令，伊朗原油出口受威胁，霍尔木兹海峡风险升温","logic":"伊朗制裁→供给减少→原油价格上涨；霍尔木兹封锁风险溢价","avg_move":"+4.8%","signal":"开多","trend":"地缘溢价确立"},{"sym":"CL","date":"2025-02-01","type":"bull","title":"OPEC+维持减产","factor":"供给收缩因子","detail":"OPEC+2月会议维持减产不变，沙特坚持守价策略","logic":"供给收缩持续→价格支撑→趋势延续","avg_move":"+2.1%","signal":"加仓"},{"sym":"CL","date":"2025-04-05","type":"bull","title":"关税战推动能源需求重构","factor":"贸易战能源因子","detail":"特朗普关税战后，能源供应链重构，美国页岩油出口需求增加","logic":"关税战→供应链重构→美国能源出口需求增加→WTI走强","avg_move":"+3.7%","signal":"开多"},{"sym":"CL","date":"2025-06-10","type":"bull","title":"霍尔木兹海峡紧张","factor":"霍尔木兹因子","detail":"美伊对峙升级，霍尔木兹海峡紧张，全球油轮保险费暴涨","logic":"霍尔木兹→全球20%原油过境→封锁风险→价格暴涨；历史案例+40%","avg_move":"+5.8%","signal":"开多","trend":"地缘溢价大幅扩张"},{"sym":"CL","date":"2025-09-15","type":"bear","title":"OPEC+讨论增产","factor":"供给扩张因子","detail":"OPEC+内部出现增产分歧，部分成员国讨论逐步增产","logic":"增产预期→供给扩大→价格承压；但地缘风险对冲部分压力","avg_move":"-3.5%","signal":"减仓"},{"sym":"CL","date":"2025-11-01","type":"bull","title":"OPEC+延长减产至2026","factor":"供给收缩因子强化","detail":"OPEC+11月会议决定将减产延至2026年底，超预期利多","logic":"长期减产确定性增强→价格中枢上移→趋势性上涨","avg_move":"+4.2%","signal":"开多","trend":"趋势确立"},{"sym":"CL","date":"2026-03-05","type":"bull","title":"原油突破100美元","factor":"多因子共振","detail":"OPEC+减产+地缘+美元走弱三因子共振，原油突破100美元关键位","logic":"技术面突破100整数关口+基本面多因子支撑→趋势加速","avg_move":"+5.0%","signal":"开多加仓","trend":"突破百元上涨趋势"},{"sym":"NG","date":"2024-07-15","type":"bear","title":"夏季需求不及预期","factor":"季节性需求因子","detail":"美国夏季气温低于历史均值，空调需求下降，天然气价格承压","logic":"季节性→需求下降→价格回落；夏季是天然气淡季","avg_move":"-5.2%","signal":"开空"},{"sym":"NG","date":"2024-10-01","type":"bull","title":"冬季需求预期启动","factor":"季节性因子+原油联动","detail":"进入10月，冬季供暖需求预期升温，叠加原油上涨联动效应","logic":"原油上涨→能源价格整体上移→天然气联动；冬季需求→价格上涨","avg_move":"+8.3%","signal":"开多","trend":"季节性上涨确立"},{"sym":"NG","date":"2025-01-15","type":"bull","title":"极寒天气+原油联动","factor":"天气因子+原油联动","detail":"美国东部极寒天气，天然气需求暴增，同时原油上涨带动","logic":"极端天气→需求暴增→价格急涨；历史同类事件平均+15%","avg_move":"+12.5%","signal":"开多","trend":"急涨行情"},{"sym":"NG","date":"2025-04-08","type":"bear","title":"春季需求回落","factor":"季节性因子","detail":"冬季结束，供暖需求回落，天然气价格季节性下跌","logic":"季节性规律→春季是天然气熊市→价格回落","avg_move":"-6.8%","signal":"开空/平多"},{"sym":"NG","date":"2025-10-20","type":"bull","title":"冬季需求+LNG出口增加","factor":"需求因子+出口因子","detail":"美国LNG出口能力提升，叠加冬季需求，天然气需求显著增加","logic":"LNG出口→国内供给减少→价格上涨；欧洲需求旺盛→美国LNG溢价","avg_move":"+9.2%","signal":"开多","trend":"上涨趋势"},{"sym":"NG","date":"2026-02-20","type":"bull","title":"欧洲天然气短缺危机","factor":"地缘供给因子","detail":"欧洲天然气库存骤降，美国LNG出口订单暴涨，价格联动上涨","logic":"欧洲需求→美国LNG出口→国内供给减少→价格上涨；传导滞后1-3天","avg_move":"+7.5%","signal":"开多","trend":"供给紧张趋势"},{"sym":"W","date":"2024-06-20","type":"bear","title":"北半球小麦丰收预期","factor":"供给增加因子","detail":"美国/欧洲/澳洲小麦产量均高于预期，全球供给充裕","logic":"丰收→供给增加→价格下跌；USDA报告上调产量预估","avg_move":"-4.5%","signal":"开空"},{"sym":"W","date":"2024-09-10","type":"bull","title":"黑海小麦出口受阻","factor":"地缘供给因子","detail":"黑海地区局势紧张，乌克兰出口受阻，全球小麦供应链担忧","logic":"黑海→全球28%小麦出口→供给减少→价格上涨","avg_move":"+5.8%","signal":"开多","trend":"供给风险溢价"},{"sym":"W","date":"2025-01-10","type":"bull","title":"天然气→尿素→小麦成本传导","factor":"成本传导因子","detail":"天然气上涨→尿素化肥成本大涨→小麦种植成本上升→价格支撑","logic":"NG↑→尿素成本↑→小麦成本↑→价格支撑；传导滞后5-10天","avg_move":"+3.2%","signal":"开多"},{"sym":"W","date":"2025-03-05","type":"bull","title":"俄罗斯小麦出口限制","factor":"供给收缩因子","detail":"俄罗斯宣布限制小麦出口配额，全球最大出口国供给收缩","logic":"俄罗斯→全球18%小麦出口→限额→供给减少→价格急涨","avg_move":"+6.1%","signal":"开多","trend":"供给冲击上涨"},{"sym":"W","date":"2025-07-01","type":"bear","title":"欧洲小麦丰收","factor":"供给增加因子","detail":"欧洲小麦产量超预期，俄罗斯出口限制放松，全球供给压力缓解","logic":"供给增加→价格回落；南半球丰收预期也压制价格","avg_move":"-3.8%","signal":"平多/减仓"},{"sym":"W","date":"2025-10-08","type":"bull","title":"拉尼娜天气影响","factor":"天气因子","detail":"拉尼娜现象导致澳洲干旱，南半球小麦减产预警","logic":"天气异常→关键产区减产→全球供给预期收紧→价格上涨","avg_move":"+4.2%","signal":"开多"},{"sym":"W","date":"2026-01-15","type":"bull","title":"黑海风险+天然气联动","factor":"地缘+成本双因子","detail":"黑海紧张局势+天然气上涨带动化肥成本，小麦价格双因子共振上涨","logic":"地缘供给+成本传导双驱动→小麦突破关键阻力位","avg_move":"+5.5%","signal":"开多","trend":"上涨趋势确立"}];
+const TRENDS_DB = [{"sym":"GC","date":"2024-09-18","type":"up","label":"上涨趋势确立","logic":"Fed降息50bp，实际利率下降，机构配置需求爆发，黄金突破历史高位"},{"sym":"GC","date":"2025-01-20","type":"up","label":"强势上涨趋势","logic":"特朗普关税战+地缘风险双驱动，多因子共振，黄金进入加速上涨阶段"},{"sym":"GC","date":"2025-06-15","type":"down","label":"短期调整","logic":"暂停降息+技术面超买，黄金进入震荡调整，非趋势性反转"},{"sym":"GC","date":"2025-08-05","type":"up","label":"恢复上涨趋势","logic":"中东地缘危机触发避险需求，多因子再次共振，黄金恢复强势上涨"},{"sym":"GC","date":"2026-03-10","type":"up","label":"加速上涨趋势","logic":"黄金突破4600，多因子完全共振，进入历史性牛市加速阶段"},{"sym":"CL","date":"2025-01-21","type":"up","label":"上涨趋势确立","logic":"伊朗制裁+OPEC减产，供给端双重收缩，原油进入上升通道"},{"sym":"CL","date":"2025-06-10","type":"up","label":"急涨行情","logic":"霍尔木兹紧张触发地缘溢价，原油短期急涨"},{"sym":"CL","date":"2025-09-15","type":"down","label":"调整趋势","logic":"增产预期压制，原油进入震荡调整"},{"sym":"CL","date":"2025-11-01","type":"up","label":"恢复上涨趋势","logic":"OPEC+延长减产确认，供给端确定性增强，原油恢复上升趋势"},{"sym":"SI","date":"2024-09-19","type":"up","label":"补涨启动","logic":"黄金先涨，白银补涨，金银比值修复+工业需求双驱动"},{"sym":"NG","date":"2024-10-01","type":"up","label":"季节性上涨确立","logic":"冬季需求预期+原油联动，天然气进入季节性上涨阶段"},{"sym":"NG","date":"2025-04-08","type":"down","label":"季节性回落","logic":"冬季结束，供暖需求消失，天然气进入季节性熊市"},{"sym":"W","date":"2024-09-10","type":"up","label":"供给风险溢价","logic":"黑海风险+天然气成本传导，小麦价格启动上涨"},{"sym":"W","date":"2025-03-05","type":"up","label":"供给冲击上涨","logic":"俄罗斯限制出口，全球供给收缩，小麦进入急涨行情"}];
+const CHAIN_LINKS = [{"from":"CL","to":"NG","label":"能源联动","delay":"滞后1-3天","desc":"原油上涨→能源价格中枢上移→天然气补涨"},{"from":"NG","to":"W","label":"成本传导","delay":"滞后5-10天","desc":"天然气上涨→尿素成本→化肥→小麦种植成本"},{"from":"GC","to":"SI","label":"金银联动","delay":"滞后0.5-2天","desc":"黄金上涨→避险扩散→白银弹性补涨"},{"from":"CL","to":"W","label":"间接传导","delay":"滞后7-14天","desc":"原油→运输成本→全球粮价"}];
+
+const SYM_COLORS = {GC:'#f5c518',SI:'#c0c0c0',CL:'#ff6b35',NG:'#4fc3f7',W:'#a5d6a7'};
+const SYM_NAMES = {GC:'黄金GC',SI:'白银SI',CL:'原油CL',NG:'天然气NG',W:'小麦W'};
+const SYM_LIST = ['GC','SI','CL','NG','W'];
+
+const DEFAULT_PERIODS = ['1H','4H','1D','1W','1M'];
+const PERIOD_NAMES_MAP = {'1H':'1小时','4H':'4小时','1D':'日K','1W':'周K','1M':'月K'};
+
+const DEFAULT_MAS = [
+  {param:5,  type:'SMA', color:'#ffa500', width:1,   dash:'solid'},
+  {param:10, type:'SMA', color:'#9370db', width:1,   dash:'solid'},
+  {param:30, type:'SMA', color:'#00bcd4', width:1,   dash:'solid'},
+  {param:60, type:'SMA', color:'#58a6ff', width:1.5, dash:'solid'},
+  {param:120,type:'SMA', color:'#e91e63', width:1,   dash:'dashed'},
+];
+
+// ============================================================
+// 状态
+// ============================================================
+let ALL_DATA = null;
+let curSym = 'GC';
+let curPeriod = '1H';
+let showMACD = false;
+let showBOLL = false;
+let chart = null;
+
+// 从localStorage加载持久化配置
+function loadConfig() {
+  try {
+    const saved = localStorage.getItem('kline_ultimate_config');
+    if (saved) return JSON.parse(saved);
+  } catch(e) {}
+  return null;
+}
+function saveConfig() {
+  try {
+    const cfg = {
+      periods: userPeriods.slice(),
+      mas: userMAConfig.map(m => ({...m})),
+      lastSym: curSym,
+      lastPeriod: curPeriod,
+      showMACD: showMACD,
+      showBOLL: showBOLL,
+    };
+    localStorage.setItem('kline_ultimate_config', JSON.stringify(cfg));
+  } catch(e) {}
+}
+
+const savedCfg = loadConfig();
+let userPeriods = (savedCfg && savedCfg.periods) ? savedCfg.periods : DEFAULT_PERIODS.slice();
+let userMAConfig = (savedCfg && savedCfg.mas) ? savedCfg.mas : DEFAULT_MAS.map(m => ({...m}));
+if (savedCfg) {
+  curSym = savedCfg.lastSym || 'GC';
+  curPeriod = savedCfg.lastPeriod || '1H';
+  showMACD = !!savedCfg.showMACD;
+  showBOLL = !!savedCfg.showBOLL;
+}
+
+// ============================================================
+// 初始化
+// ============================================================
+async function init() {
+  try {
+    const resp = await fetch(DATA_URL);
+    ALL_DATA = await resp.json();
+    chart = echarts.init(document.getElementById('chart'), 'dark');
+    buildPeriodTabs();
+    renderChart();
+    updateToolbarInfo();
+    if (showMACD) document.getElementById('btnMACD').classList.add('active');
+    if (showBOLL) document.getElementById('btnBOLL').classList.add('active');
+    window.addEventListener('resize', () => chart.resize());
+  } catch(e) {
+    document.getElementById('chart').innerHTML = '<div style="padding:40px;color:#f85149">数据加载失败: ' + e.message + '</div>';
+  }
+}
+
+// ============================================================
+// 自定义周期聚合引擎 (前端实时从1H聚合)
+// ============================================================
+function getPeriodName(p) {
+  return PERIOD_NAMES_MAP[p] || p;
+}
+
+function parsePeriodToRule(periodStr) {
+  periodStr = periodStr.toUpperCase().trim();
+  if (periodStr === '1H') return null;
+  if (periodStr === '4H') return 4;
+  if (periodStr === '1D') return 1440;
+  if (periodStr === '1W') return 10080;
+  if (periodStr === '1M') return 43200;
+  const m = periodStr.match(/^(\d+)([HDWM])$/);
+  if (!m) return null;
+  const n = parseInt(m[1]);
+  const u = m[2];
+  const mins = {H:60,D:1440,W:10080,M:43200};
+  return n * mins[u];
+}
+
+function aggregate1H(bars1h, periodStr) {
+  const rule = parsePeriodToRule(periodStr);
+  if (rule === null) return bars1h;
+  
+  const result = [];
+  let group = [];
+  let groupStartTime = null;
+  
+  for (let i = 0; i < bars1h.length; i++) {
+    const bar = bars1h[i];
+    const ts = new Date(bar[0]).getTime();
+    
+    if (groupStartTime === null) {
+      groupStartTime = ts;
+      group = [bar];
+    } else {
+      const elapsed = ts - groupStartTime;
+      if (elapsed >= rule * 60 * 1000) {
+        // 聚合当前组
+        if (group.length > 0) {
+          result.push(aggregateGroup(group));
+        }
+        group = [bar];
+        groupStartTime = ts;
+      } else {
+        group.push(bar);
+      }
+    }
+  }
+  if (group.length > 0) {
+    result.push(aggregateGroup(group));
+  }
+  return result;
+}
+
+function aggregateGroup(group) {
+  let dt = group[0][0];
+  let o = group[0][1];
+  let h = -Infinity, l = Infinity, c = group[group.length-1][4];
+  let v = 0;
+  for (const bar of group) {
+    if (bar[2] > h) h = bar[2];
+    if (bar[3] < l) l = bar[3];
+    v += bar[5] || 0;
+  }
+  if (!isFinite(h)) h = o;
+  if (!isFinite(l)) l = o;
+  return [dt, o, h, l, c, v];
+}
+
+function getBars(sym, period) {
+  const symData = ALL_DATA[sym];
+  if (!symData) return [];
+  
+  // 默认周期直接使用预聚合数据
+  if (DEFAULT_PERIODS.includes(period)) {
+    return symData.periods[period] || [];
+  }
+  
+  // 自定义周期从1H实时聚合
+  const bars1h = symData.periods['1H'];
+  if (!bars1h) return [];
+  return aggregate1H(bars1h, period);
+}
+
+// ============================================================
+// 周期Tab管理
+// ============================================================
+function buildPeriodTabs() {
+  const container = document.getElementById('periodTabs');
+  let html = '<span class="period-label">周期：</span>';
+  
+  userPeriods.forEach(p => {
+    const isCustom = !DEFAULT_PERIODS.includes(p);
+    const isActive = p === curPeriod;
+    const cls = 'period-tab' + (isActive ? ' active' : '') + (isCustom ? ' custom' : '');
+    const display = getPeriodName(p);
+    html += '<div class="'+cls+'" onclick="switchPeriod(\''+p+'\',this)">'+display+'</div>';
+  });
+  
+  container.innerHTML = html;
+}
+
+// ============================================================
+// 均线计算引擎
+// ============================================================
+function calcSMA(data, n) {
+  const r = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i < n - 1) { r.push(null); continue; }
+    let s = 0;
+    for (let j = i - n + 1; j <= i; j++) s += data[j];
+    r.push(+(s / n).toFixed(6));
+  }
+  return r;
+}
+
+function calcEMA(data, n) {
+  const k = 2 / (n + 1);
+  const r = [data[0]];
+  for (let i = 1; i < data.length; i++) {
+    r.push(+(data[i] * k + r[i-1] * (1 - k)).toFixed(6));
+  }
+  return r;
+}
+
+function calcWMA(data, n) {
+  const r = [];
+  const denom = n * (n + 1) / 2;
+  for (let i = 0; i < data.length; i++) {
+    if (i < n - 1) { r.push(null); continue; }
+    let s = 0;
+    for (let j = 0; j < n; j++) s += data[i - n + 1 + j] * (j + 1);
+    r.push(+(s / denom).toFixed(6));
+  }
+  return r;
+}
+
+function calcMAByType(data, ma) {
+  if (ma.type === 'EMA') return calcEMA(data, ma.param);
+  if (ma.type === 'WMA') return calcWMA(data, ma.param);
+  return calcSMA(data, ma.param);
+}
+
+// ============================================================
+// MACD / BOLL
+// ============================================================
+function calcMACD(closes, fast, slow, signal) {
+  fast = fast || 12; slow = slow || 26; signal = signal || 9;
+  const emaF = calcEMA(closes, fast);
+  const emaS = calcEMA(closes, slow);
+  const dif = emaF.map((v,i) => +(v - emaS[i]).toFixed(6));
+  const dea = calcEMA(dif, signal).map(v => +v.toFixed(6));
+  const macd = dif.map((v,i) => +((v - dea[i]) * 2).toFixed(6));
+  return {dif, dea, macd};
+}
+
+function calcBOLL(closes, n, k) {
+  n = n || 20; k = k || 2;
+  const ma = calcSMA(closes, n);
+  const upper = [], lower = [];
+  for (let i = 0; i < closes.length; i++) {
+    if (ma[i] === null) { upper.push(null); lower.push(null); continue; }
+    const slice = closes.slice(i-n+1, i+1);
+    const mean = slice.reduce((a,b)=>a+b,0)/n;
+    const std = Math.sqrt(slice.reduce((a,b)=>a+(b-mean)**2,0)/n);
+    upper.push(+(mean + k*std).toFixed(6));
+    lower.push(+(mean - k*std).toFixed(6));
+  }
+  return {upper, middle: ma, lower};
+}
+
+// ============================================================
+// 价格精度
+// ============================================================
+function getPrecision(price) {
+  if (price === 0) return 2;
+  const a = Math.abs(price);
+  if (a >= 1000) return 0;
+  if (a >= 100) return 2;
+  if (a >= 10) return 2;
+  if (a >= 1) return 3;
+  return 4;
+}
+function fmtP(v, p) { return v === null || v === undefined ? '-' : Number(v).toFixed(p); }
+
+// ============================================================
+// 品种/周期切换
+// ============================================================
+function switchSym(sym, el) {
+  curSym = sym;
+  document.querySelectorAll('.sym-tab').forEach(t => { t.classList.remove('active'); t.style.background=''; t.style.color=''; });
+  el.classList.add('active');
+  el.style.background = SYM_COLORS[sym];
+  el.style.color = '#000';
+  renderChart();
+  updateToolbarInfo();
+  saveConfig();
+}
+
+function switchPeriod(period, el) {
+  curPeriod = period;
+  document.querySelectorAll('.period-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  document.getElementById('iPeriod').textContent = getPeriodName(period);
+  renderChart();
+  updateToolbarInfo();
+  saveConfig();
+}
+
+// ============================================================
+// 工具栏
+// ============================================================
+function toggleMACD() { showMACD=!showMACD; document.getElementById('btnMACD').classList.toggle('active',showMACD); renderChart(); saveConfig(); }
+function toggleBOLL() { showBOLL=!showBOLL; document.getElementById('btnBOLL').classList.toggle('active',showBOLL); renderChart(); saveConfig(); }
+function zoomToFit() { if(chart) chart.dispatchAction({type:'dataZoom',start:0,end:100}); }
+function zoomRecent() { if(chart) chart.dispatchAction({type:'dataZoom',start:80,end:100}); }
+function updateToolbarInfo() {
+  if (!ALL_DATA) return;
+  const bars = getBars(curSym, curPeriod);
+  const d = ALL_DATA[curSym];
+  document.getElementById('toolbarInfo').textContent = SYM_NAMES[curSym]+' | '+getPeriodName(curPeriod)+' | '+bars.length+'条 | '+(DEFAULT_PERIODS.includes(curPeriod)?'预聚合':'实时聚合');
+}
+
+// ============================================================
+// CSV导出
+// ============================================================
+function exportCSV() {
+  const bars = getBars(curSym, curPeriod);
+  let csv = 'datetime,open,high,low,close,volume\n';
+  bars.forEach(b => { csv += b.join(',') + '\n'; });
+  const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=curSym+'_'+curPeriod+'.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================
+// 周期设置面板
+// ============================================================
+function openPeriodSettings() {
+  const list = document.getElementById('periodList');
+  let html = '';
+  userPeriods.forEach((p, i) => {
+    const isDefault = DEFAULT_PERIODS.includes(p);
+    const isCustom = !isDefault;
+    html += '<div class="ma-item">' +
+      '<span style="color:#58a6ff;font-weight:600;min-width:50px">'+getPeriodName(p)+'</span>' +
+      '<span style="color:#6e7681;font-size:10px">'+p+'</span>' +
+      (isCustom ? '<span style="color:#f5c518;font-size:9px;margin-left:4px">自定义</span>' : '<span style="color:#484f58;font-size:9px;margin-left:4px">默认</span>') +
+      '<span style="margin-left:auto"></span>' +
+      (!isDefault ? '<button class="setting-btn danger" onclick="removePeriod('+i+')" style="font-size:9px">删除</button>' : '<span style="font-size:9px;color:#30363d">不可删除</span>') +
+      '</div>';
+  });
+  list.innerHTML = html;
+  document.getElementById('periodOverlay').classList.add('show');
+  document.getElementById('periodModal').classList.add('show');
+}
+function closePeriodSettings() {
+  document.getElementById('periodOverlay').classList.remove('show');
+  document.getElementById('periodModal').classList.remove('show');
+}
+function addCustomPeriod() {
+  const input = document.getElementById('customPeriodInput');
+  let val = input.value.trim().toUpperCase();
+  if (!val) return;
+  // 格式化
+  const m = val.match(/^(\d+)([hdwmHDWM])$/);
+  if (!m) { alert('格式错误！示例: 2H, 6H, 3D, 12H'); return; }
+  val = m[1].toUpperCase() + m[2].toUpperCase();
+  if (userPeriods.includes(val)) { alert('周期 '+val+' 已存在'); return; }
+  userPeriods.push(val);
+  input.value = '';
+  openPeriodSettings(); // 刷新列表
+}
+function removePeriod(idx) {
+  const p = userPeriods[idx];
+  if (p === curPeriod) { alert('无法删除当前使用的周期'); return; }
+  userPeriods.splice(idx, 1);
+  openPeriodSettings();
+}
+function resetPeriods() {
+  userPeriods = DEFAULT_PERIODS.slice();
+  openPeriodSettings();
+}
+function saveAndClosePeriod() {
+  buildPeriodTabs();
+  saveConfig();
+  closePeriodSettings();
+  renderChart();
+  updateToolbarInfo();
+}
+
+// ============================================================
+// 均线设置面板
+// ============================================================
+function openMASettings() {
+  renderMAList();
+  document.getElementById('maOverlay').classList.add('show');
+  document.getElementById('maModal').classList.add('show');
+}
+function closeMASettings() {
+  document.getElementById('maOverlay').classList.remove('show');
+  document.getElementById('maModal').classList.remove('show');
+}
+function renderMAList() {
+  const list = document.getElementById('maList');
+  let html = '';
+  userMAConfig.forEach((ma, i) => {
+    html += '<div class="ma-item">' +
+      '<span style="font-weight:600;min-width:50px">'+ma.type+ma.param+'</span>' +
+      '<input type="color" value="'+ma.color+'" class="ma-color" onchange="updateMAColor('+i+',this.value)" title="点击修改颜色">' +
+      '<select class="ma-type-select" onchange="updateMAType('+i+',this.value)">' +
+        '<option value="SMA"'+(ma.type==='SMA'?' selected':'')+'>SMA</option>' +
+        '<option value="EMA"'+(ma.type==='EMA'?' selected':'')+'>EMA</option>' +
+        '<option value="WMA"'+(ma.type==='WMA'?' selected':'')+'>WMA</option>' +
+      '</select>' +
+      '<input class="ma-width-input" type="number" min="0.5" max="5" step="0.5" value="'+ma.width+'" onchange="updateMAWidth('+i+',this.value)" title="线宽">' +
+      '<select class="ma-dash-select" onchange="updateMADash('+i+',this.value)" title="线型">' +
+        '<option value="solid"'+(ma.dash==='solid'?' selected':'')+'>实线</option>' +
+        '<option value="dashed"'+(ma.dash==='dashed'?' selected':'')+'>虚线</option>' +
+        '<option value="dotted"'+(ma.dash==='dotted'?' selected':'')+'>点线</option>' +
+      '</select>' +
+      '<span style="margin-left:auto"></span>' +
+      '<button class="setting-btn danger" onclick="removeMA('+i+')" style="font-size:9px">删除</button>' +
+      '</div>';
+  });
+  list.innerHTML = html;
+}
+function addMA() {
+  const param = parseInt(document.getElementById('newMaParam').value);
+  const type = document.getElementById('newMaType').value;
+  const color = document.getElementById('newMaColor').value;
+  if (!param || param < 1) { alert('请输入有效参数'); return; }
+  if (userMAConfig.some(m => m.param === param && m.type === type)) { alert(type+param+' 已存在'); return; }
+  userMAConfig.push({param, type, color, width:1, dash:'solid'});
+  document.getElementById('newMaParam').value = '';
+  renderMAList();
+}
+function removeMA(idx) { userMAConfig.splice(idx, 1); renderMAList(); }
+function updateMAColor(i, v) { userMAConfig[i].color = v; }
+function updateMAType(i, v) { userMAConfig[i].type = v; }
+function updateMAWidth(i, v) { userMAConfig[i].width = parseFloat(v) || 1; }
+function updateMADash(i, v) { userMAConfig[i].dash = v; }
+function resetMA() { userMAConfig = DEFAULT_MAS.map(m=>({...m})); renderMAList(); }
+function saveAndCloseMA() {
+  saveConfig();
+  closeMASettings();
+  renderChart();
+}
+
+// ============================================================
+// 产业链面板
+// ============================================================
+function showChainPanel() {
+  const c = document.getElementById('chainContent');
+  let html = '';
+  CHAIN_LINKS.forEach(link => {
+    html += '<div class="chain-row">' +
+      '<span class="chain-sym" style="background:'+SYM_COLORS[link.from]+'">'+SYM_NAMES[link.from]+'</span>' +
+      '<span class="chain-arrow">→</span>' +
+      '<span class="chain-delay">'+link.delay+'</span>' +
+      '<span class="chain-arrow">→</span>' +
+      '<span class="chain-sym" style="background:'+SYM_COLORS[link.to]+'">'+SYM_NAMES[link.to]+'</span>' +
+      '<span style="margin-left:8px;font-size:10px;color:#58a6ff">'+link.label+'</span>' +
+      '<div style="margin-left:auto;font-size:9px;color:#6e7681">'+link.desc+'</div></div>';
+  });
+  c.innerHTML = html;
+  document.getElementById('chainOverlay').classList.add('show');
+  document.getElementById('chainPanel').classList.add('show');
+}
+function closeChainPanel() {
+  document.getElementById('chainOverlay').classList.remove('show');
+  document.getElementById('chainPanel').classList.remove('show');
+}
+
+// ============================================================
+// 事件/趋势弹窗
+// ============================================================
+function showEventPopup(ev) {
+  const isBull = ev.type==='bull';
+  document.getElementById('popupTitle').textContent = ev.title;
+  const badge = document.getElementById('popupBadge');
+  badge.className = 'popup-badge '+(isBull?'badge-bull':'badge-bear');
+  badge.textContent = (isBull?'利多':'利空')+'信号';
+  document.getElementById('popupDate').textContent = ev.date;
+  document.getElementById('popupFactor').textContent = ev.factor;
+  document.getElementById('popupDetail').textContent = ev.detail;
+  document.getElementById('popupLogic').textContent = ev.logic;
+  document.getElementById('popupAvg').textContent = ev.avg_move+' (历史同类事件均值)';
+  document.getElementById('popupSignal').textContent = ev.signal;
+  document.getElementById('popupOverlay').classList.add('show');
+  document.getElementById('eventPopup').classList.add('show');
+}
+function showTrendPopup(tr) {
+  const isUp = tr.type==='up';
+  document.getElementById('popupTitle').textContent = tr.label;
+  document.getElementById('popupBadge').className = 'popup-badge badge-trend';
+  document.getElementById('popupBadge').textContent = '趋势节点 · '+(isUp?'上涨':'下跌');
+  document.getElementById('popupDate').textContent = tr.date;
+  document.getElementById('popupFactor').textContent = isUp?'上涨趋势确立':'下跌趋势确立';
+  document.getElementById('popupDetail').textContent = tr.logic;
+  document.getElementById('popupLogic').textContent = isUp
+    ? '趋势确立后：等待回调，逢低开多；MA5上穿MA20为加仓信号'
+    : '下跌趋势：等待反弹，逢高开空；MA5下穿MA20为加仓信号';
+  document.getElementById('popupAvg').textContent = isUp?'趋势确立后平均+8~15%':'趋势确立后平均-6~12%';
+  document.getElementById('popupSignal').textContent = isUp?'开多/持多':'开空/持空';
+  document.getElementById('popupOverlay').classList.add('show');
+  document.getElementById('eventPopup').classList.add('show');
+}
+function closePopup() {
+  document.getElementById('popupOverlay').classList.remove('show');
+  document.getElementById('eventPopup').classList.remove('show');
+}
+
+// ============================================================
+// 图表渲染 (核心)
+// ============================================================
+function renderChart() {
+  if (!ALL_DATA || !chart) return;
+  const symData = ALL_DATA[curSym];
+  if (!symData) return;
+  
+  const bars = getBars(curSym, curPeriod);
+  if (!bars || bars.length === 0) return;
+
+  const dates = bars.map(b => b[0]);
+  const opens = bars.map(b => b[1]);
+  const highs = bars.map(b => b[2]);
+  const lows = bars.map(b => b[3]);
+  const closes = bars.map(b => b[4]);
+  const vols = bars.map(b => b[5] || 0);
+  const prec = getPrecision(closes[closes.length-1]);
+
+  // 更新信息栏
+  const last = bars[bars.length-1];
+  const chg = last[4]-last[1];
+  const chgPct = (chg/last[1]*100).toFixed(2);
+  document.getElementById('iName').textContent = symData.name;
+  document.getElementById('iLast').textContent = fmtP(last[4],prec);
+  document.getElementById('iOpen').textContent = fmtP(last[1],prec);
+  document.getElementById('iHigh').textContent = fmtP(last[2],prec);
+  document.getElementById('iLow').textContent = fmtP(last[3],prec);
+  const chgEl = document.getElementById('iChange');
+  chgEl.textContent = (chg>=0?'+':'')+fmtP(chg,prec)+' ('+(chg>=0?'+':'')+chgPct+'%)';
+  chgEl.className = 'val '+(chg>=0?'up':'dn');
+  document.getElementById('iBars').textContent = bars.length+'条';
+  document.getElementById('iUnit').textContent = symData.unit;
+  document.getElementById('iPeriod').textContent = getPeriodName(curPeriod);
+
+  // 事件标注
+  const symEvents = EVENTS_DB.filter(e => e.sym === curSym);
+  const symTrends = TRENDS_DB.filter(t => t.sym === curSym);
+  const markPoints = [];
+
+  function findIdx(dateStr, maxDays) {
+    let idx = dates.findIndex(d => d.startsWith(dateStr));
+    if (idx < 0) {
+      const evTs = new Date(dateStr).getTime();
+      let minDiff = Infinity, bestIdx = -1;
+      dates.forEach((d, i) => {
+        const diff = Math.abs(new Date(d.substring(0,10)).getTime()-evTs);
+        if (diff < minDiff) { minDiff=diff; bestIdx=i; }
+      });
+      if (minDiff <= maxDays*86400000) idx = bestIdx;
+    }
+    return idx;
+  }
+
+  symEvents.forEach(ev => {
+    const idx = findIdx(ev.date, 7);
+    if (idx < 0) return;
+    const color = ev.type==='bull' ? '#f85149' : '#3fb950';
+    const yVal = ev.type==='bull' ? lows[idx]*0.998 : highs[idx]*1.002;
+    markPoints.push({name:ev.title,coord:[idx,yVal],_evData:ev,symbol:'circle',symbolSize:12,itemStyle:{color,borderColor:'#fff',borderWidth:1.5},label:{show:false}});
+  });
+  symTrends.forEach(tr => {
+    const idx = findIdx(tr.date, 14);
+    if (idx < 0) return;
+    const yVal = tr.type==='up' ? lows[idx]*0.995 : highs[idx]*1.005;
+    markPoints.push({name:tr.label,coord:[idx,yVal],_trData:tr,symbol:'diamond',symbolSize:14,itemStyle:{color:'#f5c518',borderColor:'#fff',borderWidth:1.5},label:{show:false}});
+  });
+
+  // 计算均线
+  const maSeries = [];
+  const legendData = ['K线'];
+  userMAConfig.forEach(ma => {
+    const maData = calcMAByType(closes, ma);
+    const name = ma.type + ma.param;
+    maSeries.push({
+      name, type:'line', xAxisIndex:0, yAxisIndex:0, data:maData, smooth:true,
+      lineStyle:{width:ma.width, color:ma.color, type:ma.dash},
+      showSymbol:false, connectNulls:true
+    });
+    legendData.push(name);
+  });
+
+  // MACD
+  const macdData = calcMACD(closes);
+  const bollData = calcBOLL(closes);
+
+  // 动态grid
+  const hasMACD = showMACD;
+  const gridCount = hasMACD ? 3 : 2;
+  const gridH = hasMACD ? ['55%','15%','14%'] : ['62%','18%'];
+  const grids = [], xAxes = [], yAxes = [];
+  for (let i = 0; i < gridCount; i++) {
+    grids.push({left:72,right:16,top:i===0?24:undefined,height:gridH[i]});
+    xAxes.push({
+      type:'category',data:dates,axisLine:{lineStyle:{color:'#30363d'}},
+      axisLabel:{color:'#6e7681',fontSize:10,show:i===gridCount-1,
+        formatter: v => {
+          if (curPeriod==='1H'||curPeriod==='4H'||(!DEFAULT_PERIODS.includes(curPeriod)&&curPeriod.includes('H'))) return v.substring(5,10);
+          if (curPeriod==='1D'||curPeriod.includes('D')) return v.substring(0,10);
+          return v.substring(0,7);
+        }
+      },gridIndex:i,splitLine:{show:false},boundaryGap:true
+    });
+    yAxes.push({scale:true,gridIndex:i,splitLine:{lineStyle:{color:i===0?'#21262d':'transparent'}},axisLabel:{color:'#6e7681',fontSize:10,show:i===0||i===gridCount-1},axisLine:{lineStyle:{color:'#30363d'}}});
+  }
+
+  const dataZoom = [
+    {type:'inside',xAxisIndex:Array.from({length:gridCount},(_,i)=>i),start:70,end:100},
+    {type:'slider',xAxisIndex:Array.from({length:gridCount},(_,i)=>i),bottom:8,height:22,borderColor:'#30363d',fillerColor:'rgba(88,166,255,0.1)',handleStyle:{color:SYM_COLORS[curSym]},textStyle:{color:'#6e7681',fontSize:10}}
+  ];
+
+  const series = [
+    {name:'K线',type:'candlestick',xAxisIndex:0,yAxisIndex:0,data:bars.map(b=>[b[1],b[4],b[3],b[2]]),itemStyle:{color:'#f85149',color0:'#3fb950',borderColor:'#f85149',borderColor0:'#3fb950'},markPoint:{data:markPoints}},
+    ...maSeries,
+    {name:'成交量',type:'bar',xAxisIndex:1,yAxisIndex:1,data:bars.map((b,i)=>({value:vols[i],itemStyle:{color:b[4]>=b[1]?'rgba(248,81,73,0.7)':'rgba(63,185,80,0.7)'}}))}
+  ];
+
+  if (showBOLL) {
+    series.push(
+      {name:'BOLL上',type:'line',xAxisIndex:0,yAxisIndex:0,data:bollData.upper,lineStyle:{width:1,color:'#58a6ff',type:'dashed'},showSymbol:false,connectNulls:true},
+      {name:'BOLL中',type:'line',xAxisIndex:0,yAxisIndex:0,data:bollData.middle,lineStyle:{width:1,color:'#58a6ff',type:'dotted'},showSymbol:false,connectNulls:true},
+      {name:'BOLL下',type:'line',xAxisIndex:0,yAxisIndex:0,data:bollData.lower,lineStyle:{width:1,color:'#58a6ff',type:'dashed'},showSymbol:false,connectNulls:true}
+    );
+    legendData.push('BOLL上','BOLL中','BOLL下');
+  }
+
+  if (hasMACD) {
+    series.push(
+      {name:'MACD柱',type:'bar',xAxisIndex:2,yAxisIndex:2,data:macdData.macd.map((v)=>({value:v,itemStyle:{color:v>=0?'rgba(248,81,73,0.7)':'rgba(63,185,80,0.7)'}}))},
+      {name:'DIF',type:'line',xAxisIndex:2,yAxisIndex:2,data:macdData.dif,lineStyle:{width:1.2,color:'#f5c518'},showSymbol:false},
+      {name:'DEA',type:'line',xAxisIndex:2,yAxisIndex:2,data:macdData.dea,lineStyle:{width:1.2,color:'#58a6ff'},showSymbol:false}
+    );
+    legendData.push('MACD柱','DIF','DEA');
+  }
+
+  const c = SYM_COLORS[curSym];
+  const option = {
+    backgroundColor:'#0d1117',animation:false,
+    tooltip:{trigger:'axis',axisPointer:{type:'cross'},backgroundColor:'#161b22',borderColor:'#30363d',textStyle:{color:'#e6edf3',fontSize:11},
+      formatter: function(params) {
+        const k = params.find(p=>p.seriesName==='K线');
+        if (!k||!k.data) return '';
+        const [o2,c2,l2,h2]=k.data;
+        const kChg=((c2-o2)/o2*100).toFixed(2);
+        let tip='<b>'+k.axisValue+'</b><br>开:<b>'+fmtP(o2,prec)+'</b>  收:<b>'+fmtP(c2,prec)+'</b><br>高:<span style="color:#f85149">'+fmtP(h2,prec)+'</span>  低:<span style="color:#3fb950">'+fmtP(l2,prec)+'</span><br>涨跌:<span style="color:'+(c2>=o2?'#f85149':'#3fb950')+'">'+(c2>=o2?'+':'')+kChg+'%</span>';
+        // 均线信息
+        userMAConfig.forEach(ma => {
+          const mp = params.find(p=>p.seriesName===ma.type+ma.param);
+          if (mp && mp.value !== null) {
+            tip += '<br><span style="color:'+ma.color+'">'+ma.type+ma.param+': '+Number(mp.value).toFixed(prec)+'</span>';
+          }
+        });
+        if (hasMACD) {
+          const difP=params.find(p=>p.seriesName==='DIF'),deaP=params.find(p=>p.seriesName==='DEA'),macdP=params.find(p=>p.seriesName==='MACD柱');
+          if(difP&&deaP) tip+='<br><span style="color:#f5c518">DIF:'+Number(difP.value).toFixed(4)+'</span> <span style="color:#58a6ff">DEA:'+Number(deaP.value).toFixed(4)+'</span> <span style="color:'+(Number(macdP.value)>=0?'#f85149':'#3fb950')+'">MACD:'+Number(macdP.value).toFixed(4)+'</span>';
+        }
+        return tip;
+      }
+    },
+    axisPointer:{link:[{xAxisIndex:'all'}]},
+    grid:grids,xAxis:xAxes,yAxis:yAxes,dataZoom:dataZoom,series:series,
+    legend:{data:legendData,textStyle:{color:'#6e7681',fontSize:9},top:2,right:16,itemWidth:12,itemHeight:8}
+  };
+
+  chart.setOption(option, true);
+  chart.off('click');
+  chart.on('click', function(params) {
+    if (params.componentType==='markPoint') {
+      if (params.data._evData) showEventPopup(params.data._evData);
+      else if (params.data._trData) showTrendPopup(params.data._trData);
+    }
+  });
+}
+
+// ============================================================
+// 键盘快捷键
+// ============================================================
+document.addEventListener('keydown', e => {
+  if (e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT') return;
+  switch(e.key) {
+    case 'ArrowLeft': { const idx=SYM_LIST.indexOf(curSym); if(idx>0){const s=SYM_LIST[idx-1];const t=document.querySelector('.sym-tab[data-sym="'+s+'"]');if(t)switchSym(s,t);} break; }
+    case 'ArrowRight': { const idx=SYM_LIST.indexOf(curSym); if(idx<SYM_LIST.length-1){const s=SYM_LIST[idx+1];const t=document.querySelector('.sym-tab[data-sym="'+s+'"]');if(t)switchSym(s,t);} break; }
+    case 'm': case 'M': toggleMACD(); break;
+    case 'b': case 'B': toggleBOLL(); break;
+    case 'c': case 'C': showChainPanel(); break;
+    case 'e': case 'E': exportCSV(); break;
+    case 'Escape': closePopup(); closeChainPanel(); closePeriodSettings(); closeMASettings(); break;
+  }
+});
+
+// 启动
+init();
+
+// =====================================================
+// 双宝典交易信号引擎 - 基于黄色+红色交易宝典
+// =====================================================
+const TradingSignalEngine = {
+    name: "双宝典交易信号引擎 v1.0",
+    
+    // 核心交易规则（从宝典中提炼）
+    rules: {
+        // 趋势判断规则
+        trend: {
+            // 上升趋势：波峰波谷不断上移，创新高还有新高
+            uptrend: (lows, highs, i) => {
+                if (i < 2) return false;
+                return lows[i] > lows[i-2] && highs[i] > highs[i-2] && highs[i] > highs[i-1];
+            },
+            // 下降趋势：波峰波谷不断下移，创新低还有新低
+            downtrend: (lows, highs, i) => {
+                if (i < 2) return false;
+                return highs[i] < highs[i-2] && lows[i] < lows[i-2] && lows[i] < lows[i-1];
+            },
+            // 横向整理
+            sideways: (lows, highs, i) => {
+                if (i < 5) return false;
+                const range = (Math.max(...highs.slice(i-5, i)) - Math.min(...lows.slice(i-5, i)));
+                const avgClose = (highs[i] + lows[i]) / 2;
+                return (range / avgClose) < 0.02;
+            }
+        },
+        
+        // 均线多头/空头排列
+        maAlignment: (ma5, ma10, ma30, ma60) => {
+            if (!ma5 || !ma10 || !ma30 || !ma60) return 'none';
+            if (ma5 > ma10 && ma10 > ma30 && ma30 > ma60) return 'bullish';
+            if (ma5 < ma10 && ma10 < ma30 && ma30 < ma60) return 'bearish';
+            return 'none';
+        },
+        
+        // MACD信号
+        macdSignal: (macd, signal, hist, i) => {
+            if (i < 1 || !macd || !signal || !hist) return null;
+            // 金叉
+            if (macd[i-1] <= signal[i-1] && macd[i] > signal[i] && macd[i] < 0) 
+                return { type: 'golden_cross', strength: Math.abs(hist[i]) };
+            // 死叉
+            if (macd[i-1] >= signal[i-1] && macd[i] < signal[i] && macd[i] > 0) 
+                return { type: 'death_cross', strength: Math.abs(hist[i]) };
+            return null;
+        },
+        
+        // 残缺V形态识别（宝典核心：峰级分析）
+        incompleteV: (data, i) => {
+            if (i < 4) return null;
+            const a = data[i-4], b = data[i-2], c = data[i];
+            if (!a || !b || !c) return null;
+            // 底部残缺V（看多信号）
+            if (c.close > a.close && b.close < a.close && b.close < c.close) {
+                const leftRange = Math.abs(a.close - b.close);
+                const rightRange = Math.abs(c.close - b.close);
+                if (rightRange > leftRange * 0.8) {
+                    return { type: 'bottom_incomplete_v', direction: 'long', strength: rightRange / leftRange };
+                }
+            }
+            // 顶部残缺V（看空信号）
+            if (c.close < a.close && b.close > a.close && b.close > c.close) {
+                const leftRange = Math.abs(b.close - a.close);
+                const rightRange = Math.abs(b.close - c.close);
+                if (rightRange > leftRange * 0.8) {
+                    return { type: 'top_incomplete_v', direction: 'short', strength: rightRange / leftRange };
+                }
+            }
+            return null;
+        },
+        
+        // 关键位置突破（支撑/压力）
+        breakout: (data, i, lookback = 20) => {
+            if (i < lookback) return null;
+            const slice = data.slice(i - lookback, i);
+            const highs = slice.map(d => d.high);
+            const lows = slice.map(d => d.low);
+            const resistance = Math.max(...highs);
+            const support = Math.min(...lows);
+            const curr = data[i];
+            
+            if (curr.close > resistance * 1.001) 
+                return { type: 'breakout_up', level: resistance, strength: (curr.close - resistance) / resistance };
+            if (curr.close < support * 0.999) 
+                return { type: 'breakout_down', level: support, strength: (support - curr.close) / support };
+            return null;
+        },
+        
+        // 止损止盈计算
+        calcStopLoss: (entry, direction, atr) => {
+            const multiplier = 2; // 2倍ATR止损
+            if (direction === 'long') return entry - atr * multiplier;
+            return entry + atr * multiplier;
+        },
+        calcTakeProfit: (entry, direction, risk, ratio = 3) => {
+            if (direction === 'long') return entry + risk * ratio;
+            return entry - risk * ratio;
+        },
+        
+        // 盈亏比计算
+        riskReward: (entry, sl, tp) => {
+            const risk = Math.abs(entry - sl);
+            const reward = Math.abs(tp - entry);
+            return risk > 0 ? (reward / risk).toFixed(2) : 'N/A';
+        }
+    },
+    
+    // 计算ATR（平均真实波幅）
+    calcATR: (data, period = 14) => {
+        const trs = [];
+        for (let i = 1; i < data.length; i++) {
+            const tr = Math.max(
+                data[i].high - data[i].low,
+                Math.abs(data[i].high - data[i-1].close),
+                Math.abs(data[i].low - data[i-1].close)
+            );
+            trs.push(tr);
+        }
+        if (trs.length < period) return 0;
+        return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
+    },
+    
+    // 完整信号分析
+    analyze: (data, maData) => {
+        if (!data || data.length < 30) return [];
+        
+        const closes = data.map(d => d.close);
+        const highs = data.map(d => d.high);
+        const lows = data.map(d => d.low);
+        const signals = [];
+        const atr = TradingSignalEngine.calcATR(data);
+        
+        for (let i = 10; i < data.length; i++) {
+            const sig = { index: i, time: data[i].time, price: data[i].close, factors: [] };
+            
+            // 1. 趋势判断
+            if (TradingSignalEngine.rules.trend.uptrend(lows, highs, i)) {
+                sig.trend = 'up';
+                sig.factors.push({ name: '上升趋势', weight: 2 });
+            } else if (TradingSignalEngine.rules.trend.downtrend(lows, highs, i)) {
+                sig.trend = 'down';
+                sig.factors.push({ name: '下降趋势', weight: 2 });
+            } else {
+                sig.trend = 'sideways';
+                sig.factors.push({ name: '横向整理', weight: 0 });
+            }
+            
+            // 2. 均线排列
+            const ma5 = maData.ma5 ? maData.ma5[i] : null;
+            const ma10 = maData.ma10 ? maData.ma10[i] : null;
+            const ma30 = maData.ma30 ? maData.ma30[i] : null;
+            const ma60 = maData.ma60 ? maData.ma60[i] : null;
+            const alignment = TradingSignalEngine.rules.maAlignment(ma5, ma10, ma30, ma60);
+            sig.maAlignment = alignment;
+            if (alignment === 'bullish') sig.factors.push({ name: '均线多头排列', weight: 2 });
+            if (alignment === 'bearish') sig.factors.push({ name: '均线空头排列', weight: -2 });
+            
+            // 3. 残缺V形态
+            const vSig = TradingSignalEngine.rules.incompleteV(data, i);
+            if (vSig) {
+                sig.factors.push({ name: vSig.type === 'bottom_incomplete_v' ? '底部残缺V(看多)' : '顶部残缺V(看空)', weight: vSig.direction === 'long' ? 3 : -3 });
+                sig.vSignal = vSig;
+            }
+            
+            // 4. 突破信号
+            const brk = TradingSignalEngine.rules.breakout(data, i);
+            if (brk) {
+                sig.factors.push({ name: brk.type === 'breakout_up' ? '突破压力位(看多)' : '跌破支撑位(看空)', weight: brk.type === 'breakout_up' ? 2 : -2 });
+                sig.breakout = brk;
+            }
+            
+            // 5. 综合评分
+            sig.score = sig.factors.reduce((sum, f) => sum + f.weight, 0);
+            
+            // 6. 信号判定
+            if (sig.score >= 4) {
+                sig.signal = 'STRONG_BUY';
+                sig.color = '#ff4444';
+                sig.sl = TradingSignalEngine.rules.calcStopLoss(sig.price, 'long', atr);
+                sig.tp = TradingSignalEngine.rules.calcTakeProfit(sig.price, 'long', sig.price - sig.sl);
+                sig.rr = TradingSignalEngine.rules.riskReward(sig.price, sig.sl, sig.tp);
+            } else if (sig.score >= 2) {
+                sig.signal = 'BUY';
+                sig.color = '#ff8800';
+                sig.sl = TradingSignalEngine.rules.calcStopLoss(sig.price, 'long', atr);
+                sig.tp = TradingSignalEngine.rules.calcTakeProfit(sig.price, 'long', sig.price - sig.sl);
+                sig.rr = TradingSignalEngine.rules.riskReward(sig.price, sig.sl, sig.tp);
+            } else if (sig.score <= -4) {
+                sig.signal = 'STRONG_SELL';
+                sig.color = '#00cc44';
+                sig.sl = TradingSignalEngine.rules.calcStopLoss(sig.price, 'short', atr);
+                sig.tp = TradingSignalEngine.rules.calcTakeProfit(sig.price, 'short', sig.sl - sig.price);
+                sig.rr = TradingSignalEngine.rules.riskReward(sig.price, sig.sl, sig.tp);
+            } else if (sig.score <= -2) {
+                sig.signal = 'SELL';
+                sig.color = '#00ff88';
+                sig.sl = TradingSignalEngine.rules.calcStopLoss(sig.price, 'short', atr);
+                sig.tp = TradingSignalEngine.rules.calcTakeProfit(sig.price, 'short', sig.sl - sig.price);
+                sig.rr = TradingSignalEngine.rules.riskReward(sig.price, sig.sl, sig.tp);
+            } else {
+                sig.signal = 'NEUTRAL';
+                sig.color = '#666';
+            }
+            
+            signals.push(sig);
+        }
+        return signals;
+    }
+};
+
+// =====================================================
+// AI自我学习进化模块
+// =====================================================
+const AILearningModule = {
+    version: "1.0",
+    storageKey: 'daodao_ai_learning',
+    
+    // 获取历史学习数据
+    getHistory: () => {
+        try {
+            const data = localStorage.getItem(AILearningModule.storageKey);
+            return data ? JSON.parse(data) : { signals: [], performance: [], version: '1.0', lastUpdate: null };
+        } catch(e) { return { signals: [], performance: [], version: '1.0', lastUpdate: null }; }
+    },
+    
+    // 保存学习数据
+    saveHistory: (data) => {
+        data.lastUpdate = new Date().toISOString();
+        localStorage.setItem(AILearningModule.storageKey, JSON.stringify(data));
+    },
+    
+    // 记录信号表现
+    recordSignal: (signal) => {
+        const history = AILearningModule.getHistory();
+        history.signals.push({ ...signal, recordedAt: new Date().toISOString() });
+        // 只保留最近1000条
+        if (history.signals.length > 1000) history.signals = history.signals.slice(-1000);
+        AILearningModule.saveHistory(history);
+    },
+    
+    // 分析信号准确率
+    analyzePerformance: () => {
+        const history = AILearningModule.getHistory();
+        const signals = history.signals;
+        if (signals.length < 10) return { total: 0, accuracy: 'N/A', avgScore: 'N/A' };
+        
+        const buySignals = signals.filter(s => s.signal && s.signal.includes('BUY'));
+        const sellSignals = signals.filter(s => s.signal && s.signal.includes('SELL'));
+        const avgScore = signals.reduce((s, sig) => s + (sig.score || 0), 0) / signals.length;
+        
+        return {
+            total: signals.length,
+            buyCount: buySignals.length,
+            sellCount: sellSignals.length,
+            avgScore: avgScore.toFixed(2),
+            lastUpdate: history.lastUpdate
+        };
+    },
+    
+    // 自适应阈值优化（基于历史信号表现）
+    getOptimalThreshold: () => {
+        const history = AILearningModule.getHistory();
+        const signals = history.signals.filter(s => s.score !== undefined);
+        if (signals.length < 30) return { buyThreshold: 2, sellThreshold: -2 };
+        
+        // 计算信号分数的分布
+        const scores = signals.map(s => s.score);
+        const positiveScores = scores.filter(s => s > 0);
+        const negativeScores = scores.filter(s => s < 0);
+        
+        // 如果多数正向信号都很弱，提高阈值
+        let buyThreshold = 2;
+        let sellThreshold = -2;
+        
+        if (positiveScores.length > 5) {
+            const median = positiveScores.sort((a,b) => a-b)[Math.floor(positiveScores.length/2)];
+            if (median < 2) buyThreshold = 3; // 提高阈值过滤弱信号
+        }
+        if (negativeScores.length > 5) {
+            const median = negativeScores.sort((a,b) => b-a)[Math.floor(negativeScores.length/2)];
+            if (median > -2) sellThreshold = -3;
+        }
+        
+        return { buyThreshold, sellThreshold, sampleSize: signals.length };
+    },
+    
+    // 复盘报告
+    generateReport: () => {
+        const perf = AILearningModule.analyzePerformance();
+        const threshold = AILearningModule.getOptimalThreshold();
+        return {
+            ...perf,
+            threshold,
+            recommendations: [
+                `当前信号样本量: ${perf.total}`,
+                `买入信号占比: ${perf.total ? ((perf.buyCount/perf.total)*100).toFixed(1) : 0}%`,
+                `当前买入阈值: ${threshold.buyThreshold}分`,
+                `当前卖出阈值: ${threshold.sellThreshold}分`,
+                perf.total > 100 ? '样本充足，阈值可靠' : '建议积累更多数据',
+                '持续跟随市场结构进化，优化参数'
+            ]
+        };
+    }
+};
+
+
+// 信号引擎UI函数
+let showSignals = false;
+let currentSignals = [];
+
+function toggleSignals() {
+    showSignals = !showSignals;
+    const btn = document.getElementById('btn-signal');
+    btn.classList.toggle('active', showSignals);
+    if (showSignals) runSignalAnalysis();
+    else renderChart(); // 刷新图表，移除信号标记
+}
+
+function runSignalAnalysis() {
+    const data = currentData;
+    if (!data || data.length < 30) return;
+    
+    const maData = {};
+    state.maConfig.forEach(m => {
+        const ma = calcMA(data, m.period, m.type);
+        maData['ma' + m.period] = ma;
+    });
+    
+    currentSignals = TradingSignalEngine.analyze(data, maData);
+    // 记录最新信号到AI学习模块
+    if (currentSignals.length > 0) {
+        const latest = currentSignals[currentSignals.length - 1];
+        if (latest.signal !== 'NEUTRAL') {
+            AILearningModule.recordSignal(latest);
+        }
+    }
+    renderChart();
+    updateSignalInfo();
+}
+
+function updateSignalInfo() {
+    if (currentSignals.length === 0) return;
+    const latest = currentSignals[currentSignals.length - 1];
+    const infoEl = document.getElementById('signal-info');
+    if (infoEl) {
+        const sigMap = { 'STRONG_BUY': '强买入', 'BUY': '买入', 'SELL': '卖出', 'STRONG_SELL': '强卖出', 'NEUTRAL': '观望' };
+        infoEl.innerHTML = `信号: <span style="color:${latest.color};font-weight:700">${sigMap[latest.signal] || latest.signal}</span>` +
+            (latest.rr && latest.rr !== 'N/A' ? ` | 盈亏比: <span style="color:#f5c518">${latest.rr}:1</span>` : '') +
+            ` | 评分: <span style="color:${latest.score > 0 ? '#f85149' : latest.score < 0 ? '#3fb950' : '#e6edf3'}">${latest.score}</span>`;
+    }
+}
+
+function showAIReport() {
+    const report = AILearningModule.generateReport();
+    let existing = document.querySelector('.ai-report');
+    if (existing) { existing.remove(); return; }
+    
+    const div = document.createElement('div');
+    div.className = 'ai-report';
+    div.innerHTML = `<h3>🤖 AI自我学习进化报告</h3>
+        <div class="stat"><span class="label">累计信号样本</span><span class="value">${report.total}</span></div>
+        <div class="stat"><span class="label">买入信号</span><span class="value">${report.buyCount || 0}</span></div>
+        <div class="stat"><span class="label">卖出信号</span><span class="value">${report.sellCount || 0}</span></div>
+        <div class="stat"><span class="label">平均评分</span><span class="value">${report.avgScore}</span></div>
+        <div class="stat"><span class="label">买入阈值</span><span class="value">${report.threshold.buyThreshold}分</span></div>
+        <div class="stat"><span class="label">卖出阈值</span><span class="value">${report.threshold.sellThreshold}分</span></div>
+        <div class="stat"><span class="label">最后更新</span><span class="value">${report.lastUpdate || '暂无'}</span></div>
+        <br><div style="font-size:11px;color:#8b949e;font-weight:600">📋 AI建议</div>
+        ${report.recommendations.map(r => `<div class="rec">• ${r}</div>`).join('')}
+        <br><button class="toolbar-btn" onclick="this.parentElement.remove()" style="width:100%">关闭</button>`;
+    document.body.appendChild(div);
+}
+
+</script>
+</body>
+</html>

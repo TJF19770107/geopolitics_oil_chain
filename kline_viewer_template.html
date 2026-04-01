@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>大道量化系统 K线模板 v2.0</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<!-- 
+=================================================================
+大道量化系统 - 通用K线模板 v2.0
+=================================================================
+
+使用说明：
+1. 替换下方 DATA_SOURCE 对象中的数据（支持大宗商品/加密货币/股票）
+2. 数据格式：
+   {
+     "SYMBOL_NAME": {
+       "name": "显示名称",
+       "unit": "计价单位",
+       "color": "#颜色代码",
+       "periods": {
+         "1H": [[日期字符串, open, high, low, close, volume], ...],
+         "4H": [...],
+         "1D": [...],
+         "1W": [...],
+         "1M": [...]
+       }
+     }
+   }
+
+3. 替换 EVENTS_SOURCE 数组（因子标注，可选）
+4. 替换 TRENDS_SOURCE 数组（趋势节点，可选）
+
+适用场景：
+- 大宗商品K线（当前：黄金/白银/原油/天然气/小麦）
+- 币安永续合约（BTC/ETH/SOL等）
+- A股/港股行情分析
+
+注意：若数据量超过5MB，建议改为fetch外部JSON文件而非内嵌。
+=================================================================
+-->
+<style>
+/* 完整样式与 kline_viewer_v2.0.html 相同 */
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+.header{background:linear-gradient(135deg,#161b22 0%,#0d1117 100%);border-bottom:1px solid #30363d;padding:10px 20px;display:flex;align-items:center;justify-content:space-between}
+.header-left h1{font-size:16px;color:#f5c518;letter-spacing:1px}
+.header-left p{font-size:11px;color:#6e7681;margin-top:2px}
+.header-right{font-size:11px;color:#8b949e;text-align:right}
+.version-badge{display:inline-block;background:#1f6feb;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;margin-left:8px}
+.sym-tabs{display:flex;padding:8px 16px;gap:6px;background:#161b22;border-bottom:1px solid #30363d;flex-wrap:wrap;align-items:center}
+.sym-tab{padding:5px 14px;border-radius:16px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid #30363d;background:#21262d;color:#8b949e;transition:all 0.2s}
+.sym-tab.active{color:#000}
+.period-tabs{display:flex;padding:6px 16px;gap:4px;background:#0d1117;border-bottom:1px solid #21262d;align-items:center}
+.period-label{font-size:11px;color:#6e7681;margin-right:8px}
+.period-tab{padding:3px 12px;border-radius:12px;cursor:pointer;font-size:11px;font-weight:500;border:1px solid #30363d;background:transparent;color:#6e7681;transition:all 0.2s}
+.period-tab.active{background:#1f6feb;color:#fff;border-color:#1f6feb}
+.info-bar{display:flex;padding:6px 16px;gap:16px;background:#161b22;border-bottom:1px solid #30363d;flex-wrap:wrap;align-items:center}
+.info-item{font-size:12px;white-space:nowrap}
+.info-item .lbl{color:#6e7681}
+.info-item .val{font-weight:700;margin-left:4px}
+.up{color:#f85149}.dn{color:#3fb950}.neutral{color:#e6edf3}
+#chart{width:100%;height:calc(100vh - 230px);min-height:480px}
+.footer{padding:5px 16px;background:#0d1117;border-top:1px solid #21262d;font-size:10px;color:#484f58}
+.popup-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:2000;background:rgba(0,0,0,0.6)}
+.popup{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;z-index:2001;min-width:320px;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.6)}
+.popup.show,.popup-overlay.show{display:block}
+.popup-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+.popup-title{font-size:15px;font-weight:700;color:#e6edf3}
+.popup-close{cursor:pointer;color:#6e7681;font-size:18px;line-height:1;padding:0 4px}
+.popup-badge{display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600;margin-bottom:10px}
+.badge-bull{background:rgba(248,81,73,0.15);color:#f85149;border:1px solid rgba(248,81,73,0.3)}
+.badge-bear{background:rgba(63,185,80,0.15);color:#3fb950;border:1px solid rgba(63,185,80,0.3)}
+.badge-trend{background:rgba(245,197,24,0.15);color:#f5c518;border:1px solid rgba(245,197,24,0.3)}
+.popup-row{display:flex;margin-bottom:8px;font-size:12px;line-height:1.5}
+.popup-row .key{color:#6e7681;min-width:80px;flex-shrink:0}
+.popup-row .vval{color:#e6edf3;flex:1}
+.popup-divider{border:none;border-top:1px solid #21262d;margin:10px 0}
+.popup-signal{margin-top:10px;padding:10px;background:#0d1117;border-radius:8px;border-left:3px solid #f5c518}
+.popup-signal .sig-title{font-size:11px;color:#f5c518;font-weight:600;margin-bottom:4px}
+.popup-signal .sig-val{font-size:13px;color:#e6edf3;font-weight:700}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1 id="chartTitle">大道量化系统 <span class="version-badge">v2.0 模板</span></h1>
+    <p>通用K线图 · 多周期切换 · 因子标注 · 趋势信号 | 替换 DATA_SOURCE 即可复用</p>
+  </div>
+  <div class="header-right">
+    <div id="chartSubTitle">数据源：请配置 DATA_SOURCE</div>
+    <div style="margin-top:2px">不预测只识别，不预判只跟随</div>
+  </div>
+</div>
+
+<div class="sym-tabs" id="symTabs"></div>
+
+<div class="period-tabs">
+  <span class="period-label">周期：</span>
+  <div class="period-tab active" data-period="1H" onclick="switchPeriod('1H',this)">1小时</div>
+  <div class="period-tab" data-period="4H" onclick="switchPeriod('4H',this)">4小时</div>
+  <div class="period-tab" data-period="1D" onclick="switchPeriod('1D',this)">日K</div>
+  <div class="period-tab" data-period="1W" onclick="switchPeriod('1W',this)">周K</div>
+  <div class="period-tab" data-period="1M" onclick="switchPeriod('1M',this)">月K</div>
+</div>
+
+<div class="info-bar" id="infoBar">
+  <div class="info-item"><span class="lbl">品种</span><span class="val neutral" id="iName">-</span></div>
+  <div class="info-item"><span class="lbl">最新</span><span class="val neutral" id="iLast">-</span></div>
+  <div class="info-item"><span class="lbl">开</span><span class="val neutral" id="iOpen">-</span></div>
+  <div class="info-item"><span class="lbl">高</span><span class="val up" id="iHigh">-</span></div>
+  <div class="info-item"><span class="lbl">低</span><span class="val dn" id="iLow">-</span></div>
+  <div class="info-item"><span class="lbl">涨跌幅</span><span class="val" id="iChange">-</span></div>
+  <div class="info-item"><span class="lbl">周期</span><span class="val neutral" id="iPeriod">1H</span></div>
+  <div class="info-item"><span class="lbl">数据量</span><span class="val neutral" id="iBars">-</span></div>
+  <div class="info-item"><span class="lbl">单位</span><span class="val neutral" id="iUnit">-</span></div>
+</div>
+
+<div id="chart"></div>
+
+<div class="footer">大道心法：无动无静，无生无灭 | 以K线为相，以量价为证，以结构为凭 | MA5(橙) MA20(紫) MA60(蓝)</div>
+
+<div class="popup-overlay" id="popupOverlay" onclick="closePopup()"></div>
+<div class="popup" id="eventPopup">
+  <div class="popup-header">
+    <div class="popup-title" id="popupTitle">事件详情</div>
+    <div class="popup-close" onclick="closePopup()">✕</div>
+  </div>
+  <div id="popupBadge" class="popup-badge badge-bull">利多信号</div>
+  <div class="popup-row"><span class="key">时间</span><span class="vval" id="popupDate">-</span></div>
+  <div class="popup-row"><span class="key">驱动因子</span><span class="vval" id="popupFactor">-</span></div>
+  <div class="popup-row"><span class="key">事件详情</span><span class="vval" id="popupDetail">-</span></div>
+  <hr class="popup-divider">
+  <div class="popup-row"><span class="key">影响逻辑</span><span class="vval" id="popupLogic">-</span></div>
+  <div class="popup-row"><span class="key">历史涨跌</span><span class="vval" id="popupAvg">-</span></div>
+  <hr class="popup-divider">
+  <div class="popup-signal">
+    <div class="sig-title">操作建议</div>
+    <div class="sig-val" id="popupSignal">-</div>
+  </div>
+</div>
+
+<script>
+// =================================================================
+// ⚠️ 数据配置区域 - 仅需修改此处即可复用整个K线系统
+// =================================================================
+
+// 【必填】替换为你的数据
+// 支持：大宗商品 / 加密货币（BTC/ETH/SOL等）/ 股票
+// bar格式: [日期字符串, open, high, low, close, volume]
+const DATA_SOURCE = {
+  "DEMO": {
+    name: "示例品种",
+    unit: "USDT",
+    color: "#f5c518",
+    periods: {
+      "1H": [
+        // 填入你的数据，格式：["2024-01-01 00:00", 100, 105, 98, 103, 1000],
+        // 推荐使用 gen_v2_data.py 脚本生成并注入
+      ],
+      "4H": [],
+      "1D": [],
+      "1W": [],
+      "1M": []
+    }
+  }
+  // 可添加更多品种...
+};
+
+// 【可选】事件标注
+const EVENTS_SOURCE = [
+  // {sym:"DEMO", date:"2024-01-15", type:"bull", title:"事件名称",
+  //  factor:"驱动因子", detail:"详情", logic:"影响逻辑",
+  //  avg_move:"+3%", signal:"开多"},
+];
+
+// 【可选】趋势节点
+const TRENDS_SOURCE = [
+  // {sym:"DEMO", date:"2024-02-01", type:"up", label:"上涨趋势确立",
+  //  logic:"驱动逻辑说明"},
+];
+
+// =================================================================
+// 以下代码通用，无需修改
+// =================================================================
+
+let curSym = Object.keys(DATA_SOURCE)[0];
+let curPeriod = '1H';
+const chart = echarts.init(document.getElementById('chart'), 'dark');
+const PERIOD_NAMES = {'1H':'1小时','4H':'4小时','1D':'日K','1W':'周K','1M':'月K'};
+
+// 动态生成品种Tab
+function initSymTabs() {
+  const container = document.getElementById('symTabs');
+  Object.entries(DATA_SOURCE).forEach(([sym, d], i) => {
+    const tab = document.createElement('div');
+    tab.className = 'sym-tab' + (i === 0 ? ' active' : '');
+    tab.textContent = d.name;
+    tab.style.cssText = i === 0 ? 'background:' + d.color + ';color:#000;border-color:' + d.color : '';
+    tab.onclick = function() { switchSym(sym, this); };
+    container.appendChild(tab);
+  });
+}
+
+function switchSym(sym, el) {
+  curSym = sym;
+  document.querySelectorAll('.sym-tab').forEach(t => { t.classList.remove('active'); t.style.cssText = ''; });
+  el.classList.add('active');
+  const c = DATA_SOURCE[sym].color;
+  el.style.cssText = 'background:' + c + ';color:#000;border-color:' + c;
+  renderChart();
+}
+
+function switchPeriod(period, el) {
+  curPeriod = period;
+  document.querySelectorAll('.period-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('iPeriod').textContent = PERIOD_NAMES[period];
+  renderChart();
+}
+
+function calcMA(closes, n) {
+  return closes.map((_, i) => {
+    if (i < n - 1) return null;
+    const slice = closes.slice(i - n + 1, i + 1);
+    return parseFloat((slice.reduce((a, b) => a + b, 0) / n).toFixed(4));
+  });
+}
+
+function renderChart() {
+  const symData = DATA_SOURCE[curSym];
+  if (!symData) return;
+  const bars = symData.periods[curPeriod] || symData.periods['1H'];
+  if (!bars || bars.length === 0) {
+    chart.setOption({ title: { text: '暂无' + PERIOD_NAMES[curPeriod] + '数据', textStyle: { color: '#6e7681' }, left: 'center', top: 'center' } }, true);
+    return;
+  }
+
+  const closes = bars.map(b => b[4]);
+  const vols = bars.map(b => b[5] || 0);
+  const last = bars[bars.length - 1];
+  const chg = last[4] - last[1];
+  const chgPct = (chg / last[1] * 100).toFixed(2);
+  document.getElementById('iName').textContent = symData.name;
+  document.getElementById('iLast').textContent = last[4];
+  document.getElementById('iOpen').textContent = last[1];
+  document.getElementById('iHigh').textContent = last[2];
+  document.getElementById('iLow').textContent = last[3];
+  const chgEl = document.getElementById('iChange');
+  chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(4) + ' (' + (chg >= 0 ? '+' : '') + chgPct + '%)';
+  chgEl.className = 'val ' + (chg >= 0 ? 'up' : 'dn');
+  document.getElementById('iBars').textContent = bars.length + '条';
+  document.getElementById('iUnit').textContent = symData.unit;
+
+  const dates = bars.map(b => b[0]);
+  const markPoints = [];
+  const symEvents = EVENTS_SOURCE.filter(e => e.sym === curSym);
+  const symTrends = TRENDS_SOURCE.filter(t => t.sym === curSym);
+
+  function findIdx(dateStr) {
+    let idx = dates.findIndex(d => d.startsWith(dateStr));
+    if (idx < 0) {
+      const evTs = new Date(dateStr).getTime();
+      let minDiff = Infinity, bestIdx = -1;
+      dates.forEach((d, i) => { const diff = Math.abs(new Date(d.substring(0,10)).getTime() - evTs); if (diff < minDiff) { minDiff = diff; bestIdx = i; } });
+      if (minDiff <= 7 * 86400000) idx = bestIdx;
+    }
+    return idx;
+  }
+
+  symEvents.forEach(ev => {
+    const idx = findIdx(ev.date);
+    if (idx < 0) return;
+    const lows2 = bars.map(b => b[3]);
+    const highs2 = bars.map(b => b[2]);
+    const yVal = ev.type === 'bull' ? lows2[idx] * 0.998 : highs2[idx] * 1.002;
+    markPoints.push({ name: ev.title, coord: [idx, yVal], _evData: ev, symbol: 'circle', symbolSize: 12, itemStyle: { color: ev.type === 'bull' ? '#f85149' : '#3fb950', borderColor: '#fff', borderWidth: 1.5 }, label: { show: false } });
+  });
+
+  symTrends.forEach(tr => {
+    const idx = findIdx(tr.date);
+    if (idx < 0) return;
+    const lows2 = bars.map(b => b[3]);
+    const highs2 = bars.map(b => b[2]);
+    const yVal = tr.type === 'up' ? lows2[idx] * 0.995 : highs2[idx] * 1.005;
+    markPoints.push({ name: tr.label, coord: [idx, yVal], _trData: tr, symbol: 'diamond', symbolSize: 16, itemStyle: { color: '#f5c518', borderColor: '#fff', borderWidth: 1.5 }, label: { show: false } });
+  });
+
+  const c = symData.color;
+  chart.setOption({
+    backgroundColor: '#0d1117', animation: false,
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: '#161b22', borderColor: '#30363d', textStyle: { color: '#e6edf3', fontSize: 11 },
+      formatter: function(params) {
+        const k = params.find(p => p.seriesName === 'K线');
+        if (!k || !k.data) return '';
+        const [o2, c2, l2, h2] = k.data;
+        const kChg = ((c2 - o2) / o2 * 100).toFixed(2);
+        return '<b>' + k.axisValue + '</b><br>开:<b>' + o2 + '</b> 收:<b>' + c2 + '</b><br>高:<span style="color:#f85149">' + h2 + '</span> 低:<span style="color:#3fb950">' + l2 + '</span><br>涨跌:<span style="color:' + (c2>=o2?'#f85149':'#3fb950') + '">' + (c2>=o2?'+':'') + kChg + '%</span>';
+      }
+    },
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    grid: [{ left: 72, right: 16, top: 24, height: '62%' }, { left: 72, right: 16, bottom: 44, height: '18%' }],
+    xAxis: [
+      { type: 'category', data: dates, axisLine: { lineStyle: { color: '#30363d' } }, axisLabel: { color: '#6e7681', fontSize: 10, formatter: v => curPeriod === '1H' || curPeriod === '4H' ? v.substring(5,10) : v.substring(0,10) }, gridIndex: 0, splitLine: { show: false }, boundaryGap: true },
+      { type: 'category', data: dates, axisLabel: { show: false }, gridIndex: 1, splitLine: { show: false }, boundaryGap: true }
+    ],
+    yAxis: [
+      { scale: true, gridIndex: 0, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#6e7681', fontSize: 10 } },
+      { scale: true, gridIndex: 1, splitNumber: 2, axisLabel: { show: false }, splitLine: { show: false } }
+    ],
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0,1], start: 70, end: 100 },
+      { type: 'slider', xAxisIndex: [0,1], bottom: 8, height: 22, borderColor: '#30363d', fillerColor: 'rgba(88,166,255,0.1)', handleStyle: { color: c }, textStyle: { color: '#6e7681', fontSize: 10 } }
+    ],
+    series: [
+      { name: 'K线', type: 'candlestick', xAxisIndex: 0, yAxisIndex: 0, data: bars.map(b => [b[1], b[4], b[3], b[2]]), itemStyle: { color: '#f85149', color0: '#3fb950', borderColor: '#f85149', borderColor0: '#3fb950' }, markPoint: { data: markPoints } },
+      { name: 'MA5', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: calcMA(closes, 5), smooth: true, lineStyle: { width: 1, color: '#ffa500' }, showSymbol: false, connectNulls: true },
+      { name: 'MA20', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: calcMA(closes, 20), smooth: true, lineStyle: { width: 1, color: '#9370db' }, showSymbol: false, connectNulls: true },
+      { name: 'MA60', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: calcMA(closes, 60), smooth: true, lineStyle: { width: 1.5, color: '#58a6ff' }, showSymbol: false, connectNulls: true },
+      { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: bars.map((b, i) => ({ value: vols[i], itemStyle: { color: b[4] >= b[1] ? 'rgba(248,81,73,0.7)' : 'rgba(63,185,80,0.7)' } })) }
+    ],
+    legend: { data: ['K线','MA5','MA20','MA60'], textStyle: { color: '#6e7681', fontSize: 10 }, top: 2, right: 16, itemWidth: 12, itemHeight: 8 }
+  }, true);
+
+  chart.off('click');
+  chart.on('click', function(params) {
+    if (params.componentType === 'markPoint') {
+      const d = params.data;
+      if (d._evData) showEventPopup(d._evData);
+      else if (d._trData) showTrendPopup(d._trData);
+    }
+  });
+}
+
+function showEventPopup(ev) {
+  document.getElementById('popupTitle').textContent = ev.title;
+  const badge = document.getElementById('popupBadge');
+  badge.className = 'popup-badge ' + (ev.type === 'bull' ? 'badge-bull' : 'badge-bear');
+  badge.textContent = ev.type === 'bull' ? '利多信号' : '利空信号';
+  document.getElementById('popupDate').textContent = ev.date;
+  document.getElementById('popupFactor').textContent = ev.factor;
+  document.getElementById('popupDetail').textContent = ev.detail;
+  document.getElementById('popupLogic').textContent = ev.logic;
+  document.getElementById('popupAvg').textContent = ev.avg_move + '（历史同类事件均值）';
+  document.getElementById('popupSignal').textContent = ev.signal;
+  document.getElementById('popupOverlay').classList.add('show');
+  document.getElementById('eventPopup').classList.add('show');
+}
+
+function showTrendPopup(tr) {
+  document.getElementById('popupTitle').textContent = tr.label;
+  document.getElementById('popupBadge').className = 'popup-badge badge-trend';
+  document.getElementById('popupBadge').textContent = '趋势节点 · ' + (tr.type === 'up' ? '上涨' : '下跌');
+  document.getElementById('popupDate').textContent = tr.date;
+  document.getElementById('popupFactor').textContent = tr.type === 'up' ? '上涨趋势确立' : '下跌趋势确立';
+  document.getElementById('popupDetail').textContent = tr.logic;
+  document.getElementById('popupLogic').textContent = tr.type === 'up' ? '等待回调逢低开多' : '等待反弹逢高开空';
+  document.getElementById('popupAvg').textContent = tr.type === 'up' ? '趋势确立后平均+8~15%' : '趋势确立后平均-6~12%';
+  document.getElementById('popupSignal').textContent = tr.type === 'up' ? '开多/持多' : '开空/持空';
+  document.getElementById('popupOverlay').classList.add('show');
+  document.getElementById('eventPopup').classList.add('show');
+}
+
+function closePopup() {
+  document.getElementById('popupOverlay').classList.remove('show');
+  document.getElementById('eventPopup').classList.remove('show');
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePopup(); });
+window.addEventListener('resize', () => chart.resize());
+
+initSymTabs();
+renderChart();
+</script>
+</body>
+</html>
