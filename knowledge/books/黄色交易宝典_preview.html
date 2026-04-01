@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>黄色交易宝典</title>
+    <style>
+        body { text-align: center; background: #f0f0f0; margin: 0; padding: 20px; }
+        .page-container { max-width: 900px; margin: 0 auto; background: white; padding: 20px; box-shadow: 0 0 10px #ccc; }
+        img { max-width: 100%; height: auto; }
+        .nav { margin: 20px 0; }
+        button { padding: 10px 20px; margin: 0 10px; font-size: 16px; cursor: pointer; }
+        .info { color: #666; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>黄色交易宝典</h1>
+    <div class="nav">
+        <button onclick="prevPage()">Prev</button>
+        <span id="pageInfo">Page 1 / 125</span>
+        <button onclick="nextPage()">Next</button>
+    </div>
+    <div class="page-container">
+        <img id="pageImg" src="黄色交易宝典_pages/page_001.jpg" alt="Page 1">
+    </div>
+    <div class="nav">
+        <button onclick="prevPage()">Prev</button>
+        <span id="pageInfo2" class="info">Page 1 / 125</span>
+        <button onclick="nextPage()">Next</button>
+    </div>
+
+    <script>
+        let currentPage = 1;
+        const totalPages = 125;
+        const img = document.getElementById('pageImg');
+        const pageInfo = document.getElementById('pageInfo');
+        const pageInfo2 = document.getElementById('pageInfo2');
+
+        function updatePage() {
+            const pageNum = String(currentPage).padStart(3, '0');
+            img.src = '黄色交易宝典_pages/page_' + pageNum + '.jpg';
+            pageInfo.textContent = 'Page ' + currentPage + ' / ' + totalPages;
+            pageInfo2.textContent = 'Page ' + currentPage + ' / ' + totalPages;
+            window.scrollTo(0, 0);
+        }
+
+        function prevPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                updatePage();
+            }
+        }
+
+        function nextPage() {
+            if (currentPage < totalPages) {
+                currentPage++;
+                updatePage();
+            }
+        }
+        
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowLeft') prevPage();
+            if (e.key === 'ArrowRight') nextPage();
+        });
+    </script>
+</body>
+</html>
